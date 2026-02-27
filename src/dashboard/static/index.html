@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Karkhana — Software Factory</title>
+    <meta
+      name="description"
+      content="Live dashboard for the Karkhana multi-agent software factory"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <!-- ── Top bar ────────────────────────────────────────── -->
+    <header id="topbar">
+      <div class="topbar-left">
+        <span class="logo">⚙️</span>
+        <h1>Karkhana</h1>
+        <span class="badge" id="status-badge">Idle</span>
+      </div>
+      <div class="topbar-right">
+        <span class="meta" id="llm-calls">LLM calls: 0</span>
+        <span class="meta" id="elapsed-time">0:00</span>
+        <span class="connection-dot" id="ws-dot" title="Disconnected"></span>
+      </div>
+    </header>
+
+    <!-- ── Pipeline timeline ──────────────────────────────── -->
+    <nav id="pipeline-timeline">
+      <div class="stage" data-stage="pm_agent">
+        <div class="stage-icon">📋</div>
+        <div class="stage-label">PRD</div>
+        <div class="stage-line"></div>
+      </div>
+      <div class="stage" data-stage="architect_agent">
+        <div class="stage-icon">🏗️</div>
+        <div class="stage-label">Architecture</div>
+        <div class="stage-line"></div>
+      </div>
+      <div class="stage" data-stage="taskmaster">
+        <div class="stage-icon">📦</div>
+        <div class="stage-label">Queue</div>
+        <div class="stage-line"></div>
+      </div>
+      <div class="stage" data-stage="coder_agent">
+        <div class="stage-icon">💻</div>
+        <div class="stage-label">Coder</div>
+        <div class="stage-line"></div>
+      </div>
+      <div class="stage" data-stage="reviewer_agent">
+        <div class="stage-icon">🔍</div>
+        <div class="stage-label">Reviewer</div>
+        <div class="stage-line"></div>
+      </div>
+      <div class="stage" data-stage="sandbox_executor">
+        <div class="stage-icon">🧪</div>
+        <div class="stage-label">Sandbox</div>
+        <div class="stage-line"></div>
+      </div>
+      <div class="stage" data-stage="complete">
+        <div class="stage-icon">✅</div>
+        <div class="stage-label">Done</div>
+      </div>
+    </nav>
+
+    <!-- ── Main content ───────────────────────────────────── -->
+    <main id="main-content">
+      <!-- Left: Live feed -->
+      <section id="live-feed-panel" class="panel">
+        <div class="panel-header">
+          <h2>Live Feed</h2>
+          <button id="clear-feed-btn" class="btn-ghost" title="Clear feed">
+            ✕
+          </button>
+        </div>
+        <div id="live-feed" class="scrollable"></div>
+      </section>
+
+      <!-- Center: Stage output / Code viewer -->
+      <section id="output-panel" class="panel">
+        <div class="panel-header">
+          <h2 id="output-title">Output</h2>
+          <div class="panel-actions" id="output-actions" style="display: none">
+            <button id="approve-btn" class="btn-primary">✓ Approve</button>
+            <button id="edit-btn" class="btn-secondary">✎ Edit</button>
+          </div>
+        </div>
+        <div id="output-viewer" class="scrollable">
+          <div id="empty-state" class="empty-state">
+            <div class="empty-icon">🏭</div>
+            <p>Start a build to see agent outputs here</p>
+          </div>
+        </div>
+        <!-- Inline editor (hidden by default) -->
+        <div id="editor-container" style="display: none">
+          <textarea id="edit-textarea" spellcheck="false"></textarea>
+          <div class="editor-actions">
+            <button id="save-edit-btn" class="btn-primary">
+              Save & Approve
+            </button>
+            <button id="cancel-edit-btn" class="btn-ghost">Cancel</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right: File browser -->
+      <section id="file-panel" class="panel">
+        <div class="panel-header">
+          <h2>Files</h2>
+          <span class="file-count" id="file-count">0 files</span>
+        </div>
+        <div id="file-tree" class="scrollable"></div>
+        <div id="file-preview" class="scrollable" style="display: none">
+          <div class="file-preview-header">
+            <button id="back-to-tree-btn" class="btn-ghost">← Back</button>
+            <span id="preview-filename"></span>
+          </div>
+          <pre id="file-preview-code"><code></code></pre>
+        </div>
+      </section>
+    </main>
+
+    <!-- ── Error triage modal ─────────────────────────────── -->
+    <div id="error-modal" class="modal" style="display: none">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>⚠️ Self-Healing Failed</h2>
+          <button id="close-error-modal" class="btn-ghost">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="error-split">
+            <div class="error-side">
+              <h3>Error</h3>
+              <pre id="error-message"></pre>
+            </div>
+            <div class="error-side">
+              <h3>Generated Code</h3>
+              <pre id="error-code"></pre>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="retry-error-btn" class="btn-primary">Retry</button>
+          <button id="skip-error-btn" class="btn-secondary">Skip File</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

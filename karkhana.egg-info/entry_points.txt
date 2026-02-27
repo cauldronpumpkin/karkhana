@@ -1,0 +1,2 @@
+[console_scripts]
+karkhana = src.main:main

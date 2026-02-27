@@ -1,0 +1,11 @@
+"""Example input file for testing the factory."""
+
+Create a task management application that allows users to:
+- Create, read, update, and delete tasks
+- Set priorities (low, medium, high)
+- Set due dates for tasks
+- Categorize tasks into projects
+- Filter tasks by priority, date, or project
+- View statistics about completed vs pending tasks
+
+The app should have a modern, responsive interface with dark mode support.

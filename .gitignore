@@ -1,1 +1,7 @@
 .aider*
+karkhana.db
+karkhana.db-shm
+karkhana.db-wal
+.env
+**/__pycache__/
+*.pyc

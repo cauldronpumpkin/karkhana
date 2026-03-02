@@ -14,9 +14,18 @@ src/agents/__init__.py
 src/agents/architect_agent.py
 src/agents/base.py
 src/agents/coder_agent.py
+src/agents/dynamic_agent.py
+src/agents/ideas_manager.py
 src/agents/pm_agent.py
+src/agents/pm_consensus.py
 src/agents/reviewer_agent.py
 src/agents/taskmaster.py
+src/agents/template_manager.py
+src/agents/workflow_manager.py
+src/dashboard/__init__.py
+src/dashboard/event_bus.py
+src/dashboard/models.py
+src/dashboard/server.py
 src/graph/__init__.py
 src/graph/edges.py
 src/graph/flow.py
@@ -31,4 +40,5 @@ src/utils/__init__.py
 src/utils/logger.py
 src/utils/parser.py
 src/utils/prompts.py
+src/utils/start_scripts.py
 tests/__init__.py

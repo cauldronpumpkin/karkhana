@@ -4,8 +4,26 @@ import json
 import re
 
 
+def extract_tag_block(text: str, tag: str) -> str | None:
+    """Extract content inside a simple XML-like tag block."""
+    if not text or not tag:
+        return None
+    pattern = rf"<{re.escape(tag)}>\s*(.*?)\s*</{re.escape(tag)}>"
+    match = re.search(pattern, text, flags=re.DOTALL | re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    return None
+
+
 def extract_json(text: str) -> dict | None:
     """Extract JSON from text that may contain markdown or other formatting."""
+    tagged = extract_tag_block(text, "json_output")
+    if tagged:
+        try:
+            return json.loads(tagged)
+        except json.JSONDecodeError:
+            pass
+
     # Try to find JSON in backticks first (markdown code blocks)
     json_match = re.search(r'```(?:json)?\s*({.*?})\s*```', text, re.DOTALL | re.IGNORECASE)
     if json_match:
@@ -31,6 +49,10 @@ def extract_json(text: str) -> dict | None:
 
 def extract_code_block(text: str) -> str:
     """Extract code from markdown code blocks."""
+    tagged = extract_tag_block(text, "code_output")
+    if tagged:
+        return tagged.strip()
+
     code_match = re.search(r'```(?:\w+)?\s*(.*?)```', text, re.DOTALL)
     if code_match:
         return code_match.group(1).strip()

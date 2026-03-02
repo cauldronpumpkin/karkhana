@@ -40,6 +40,8 @@ class WSCommand(BaseModel):
 
     action: str
     stage: str | None = None
+    job_id: str | None = None
+    message: str | None = None
     edited_data: dict[str, Any] | None = None
 
 

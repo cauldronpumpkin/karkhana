@@ -1,0 +1,15 @@
+node_modules/
+__pycache__/
+*.pyc
+data/
+.env
+frontend/dist/
+.venv/
+*.egg-info/
+.build/
+.pytest_cache/
+.svelte-kit/
+test-results/
+playwright-report/
+coverage/
+*.log

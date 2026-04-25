@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "idea-refinery"
+version = "0.1.0"
+description = "Idea Refinery scaffolding"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi",
+  "uvicorn",
+  "openai",
+  "python-dotenv",
+  "python-multipart",
+  "httpx",
+  "boto3",
+  "mangum",
+  "pydantic-settings",
+  "PyJWT",
+  "cryptography",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["backend*"]

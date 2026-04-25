@@ -1,0 +1,43 @@
+## 2026-04-20
+- FileManager now bootstraps `data/ideas/` on init and creates per-idea `research/prompts`, `research/results`, and `reports` folders idempotently.
+- Research prompts are numbered by scanning existing `*.md` files and results are matched by exact filename, keeping pending/completed lookups simple.
+- Chat history is stored as JSONL with one object per line; report files use fixed phase-to-number prefixes.
+- Chat router uses `openai.types.chat.ChatCompletionMessageParam` for type-safe message lists passed to `LLMService.chat_completion()`.
+- WebSocket endpoint saves messages to both JSONL (via FileManager) and SQLite (via Message model) in the same handler loop.
+- REST `POST /chat/message` mirrors WebSocket logic but returns the full assistant text in a single JSON response.
+- MemoryService uses `async_session_factory()` directly (not `Depends(get_db)`) matching existing router patterns (chat.py, scoring.py).
+- ProjectMemory model uses String(20) for category (not SQLAlchemy Enum), so validation is done in service layer.
+- Router pattern: lazy-initialized singleton service via `get_service()` function with global `_service` variable.
+- FastAPI can serve Vite `dist/` assets without a mounted root app by using a `StaticFiles` instance's `get_response()` inside a catch-all route, then falling back to `index.html` for SPA paths.
+- SPA catch-all routes should come after API routers so `/api/*` endpoints keep priority and aren't swallowed by the frontend handler.
+- Services import `async_session_factory` directly from `backend.app.database`, so patching for tests must target each module's import location (e.g., `backend.app.services.phase_engine.async_session_factory`), not just the source module.
+- Slug generation uses `re.sub(r'[^\w-]', '', ...)` which preserves hyphens from space-replaced titles, so "AI Cooking App" → "ai-cooking-app" not "aicookingapp".
+- `BuildHandoffService.mark_step_complete` relies on memory service to persist completed_steps across calls — mock must be stateful, not just AsyncMock returning None.
+- Chat router creates `llm_service = LLMService()` at module level, so patching must target `backend.app.routers.chat.llm_service` directly.
+- Test isolation: in-memory SQLite shares data across tests in same session — assertions on counts (e.g., `len(memories) == 2`) can fail if other tests created entries. Use ID-based assertions instead.
+- Svelte 5 + vitest requires `resolve.conditions: ['browser']` in vite config to use client build instead of server build (otherwise `mount()` is unavailable).
+- Svelte 5 components with `<slot />` need `children` prop in `@testing-library/svelte` render calls, not `text`.
+- SvelteKit `$app/stores` auto-subscription (`$page`) requires `@sveltejs/kit` to be installed for the Svelte compiler to recognize it. Without it, components using `$page.params.x` fail to compile.
+- `Element.prototype.scrollIntoView` must be mocked in jsdom environment.
+- WebSocket mocks must be constructor functions (classes), not `vi.fn().mockImplementation(() => ...)`.
+- `@testing-library/jest-dom/vitest` must be imported in setup file for `toBeInTheDocument()` matcher.
+- API shim file needed at `src/lib/components/api.js` to resolve relative imports from nested component directories.
+- Playwright E2E tests: install `@playwright/test` at project root (not just frontend/) for `playwright.config.js` resolution.
+- E2E LLM mocking: create `backend/app/test_server.py` that patches `LLMService` class methods BEFORE importing the app, then also patches the chat router's module-level `llm_service` instance using `types.MethodType`.
+- Test server startup event must drop and recreate all DB tables (`Base.metadata.drop_all` then `create_all`) for clean state between runs.
+- Scoring service returns scores as a dict (not array): `{"tam": {"value": 8.0, "rationale": "..."}}`.
+- Phase suggest endpoint returns `{"ready": bool, "reasoning": str, "next_phase": str}` — no `suggestion` key.
+- Research service `generate_research_prompts` returns `[{"topic": str, "prompt": str, "task_id": str}]`.
+- E2E tests use Playwright's `request` fixture for API setup and `page` fixture for UI interactions.
+- `reuseExistingServer: !process.env.CI` in playwright config prevents server restart during local dev.
+
+## 2026-04-20 — F1 Plan Compliance Audit Findings
+- All 9 Must Have requirements verified present with implementation files
+- All 10 Must NOT Have guardrails verified absent (matches only in node_modules)
+- All 23 tasks implemented with corresponding files
+- AI slop patterns: CLEAN — no over-abstraction, no excessive comments, no generic names in production code
+- Evidence files: `.sisyphus/evidence/` directory does not exist — process gap, not functional defect
+- Minor: `reports.py:6` has unused `from sqlalchemy.orm import Session` import
+- Minor: `init_db.py:32` has `print()` — acceptable for init script
+- Test counts: 81 pytest + 15 vitest + 11 Playwright = 107 total tests passing
+- VERDICT: APPROVE

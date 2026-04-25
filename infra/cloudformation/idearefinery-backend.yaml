@@ -1,0 +1,221 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Pay-per-use Idea Refinery backend on Lambda, HTTP API, and DynamoDB.
+
+Parameters:
+  StageName:
+    Type: String
+    Default: "$default"
+  ZaiApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+  ZaiApiBaseUrl:
+    Type: String
+    Default: "https://api.z.ai/api/coding/paas/v4"
+  ZaiModel:
+    Type: String
+    Default: "glm-5.1"
+  GitHubAppId:
+    Type: String
+    Default: ""
+  GitHubAppPrivateKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+  GitHubWebhookSecret:
+    Type: String
+    Default: ""
+    NoEcho: true
+  WorkerAuthToken:
+    Type: String
+    Default: ""
+    NoEcho: true
+
+Resources:
+  IdeaRefineryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: idearefinery-prod
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI2
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: app
+          Value: idearefinery
+
+  BackendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/idearefinery-backend-prod
+      RetentionInDays: 14
+
+  BackendRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: idearefinery-backend-prod-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: idearefinery-backend-prod-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "${BackendLogGroup.Arn}:*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:DeleteItem
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !GetAtt IdeaRefineryTable.Arn
+                  - !Sub "${IdeaRefineryTable.Arn}/index/*"
+
+  BackendFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: idearefinery-backend-prod
+      Description: Idea Refinery FastAPI backend.
+      Runtime: python3.11
+      Architectures:
+        - arm64
+      Handler: backend.app.lambda_handler.handler
+      Role: !GetAtt BackendRole.Arn
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          IDEAREFINERY_STORAGE: dynamodb
+          DYNAMODB_TABLE_NAME: !Ref IdeaRefineryTable
+          ZAI_API_KEY: !Ref ZaiApiKey
+          ZAI_API_BASE_URL: !Ref ZaiApiBaseUrl
+          ZAI_MODEL: !Ref ZaiModel
+          GITHUB_APP_ID: !Ref GitHubAppId
+          GITHUB_APP_PRIVATE_KEY: !Ref GitHubAppPrivateKey
+          GITHUB_WEBHOOK_SECRET: !Ref GitHubWebhookSecret
+          IDEAREFINERY_WORKER_AUTH_TOKEN: !Ref WorkerAuthToken
+          IDEAREFINERY_WORKER_CLAIM_TIMEOUT_SECONDS: "900"
+          IDEAREFINERY_WORKER_MAX_RETRIES: "3"
+      Code:
+        ZipFile: |
+          def handler(event, context):
+              return {"statusCode": 503, "body": "Deployment package has not been uploaded yet."}
+      Tags:
+        - Key: app
+          Value: idearefinery
+    DependsOn:
+      - BackendLogGroup
+
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: idearefinery-backend-prod
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          - OPTIONS
+        AllowHeaders:
+          - "*"
+        MaxAge: 300
+      Tags:
+        app: idearefinery
+
+  LambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt BackendFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  RootRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "ANY /"
+      Target: !Sub "integrations/${LambdaIntegration}"
+
+  ProxyRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "ANY /{proxy+}"
+      Target: !Sub "integrations/${LambdaIntegration}"
+
+  DefaultStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: !Ref StageName
+      AutoDeploy: true
+
+  ApiInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BackendFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*/*"
+
+Outputs:
+  ApiEndpoint:
+    Description: HTTP API invoke URL for frontend VITE_API_BASE_URL.
+    Value: !GetAtt HttpApi.ApiEndpoint
+  DynamoDBTableName:
+    Description: DynamoDB table name.
+    Value: !Ref IdeaRefineryTable
+  LambdaFunctionName:
+    Description: Lambda function name.
+    Value: !Ref BackendFunction

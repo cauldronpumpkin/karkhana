@@ -28,17 +28,18 @@ if (-not $apiId -or $apiId -eq "None") {
   throw "Could not find HTTP API named $ApiName in $Region."
 }
 
-$domainExists = $true
-try {
-  $domain = aws apigatewayv2 get-domain-name `
-    --region $Region `
-    --domain-name $DomainName `
-    --output json | ConvertFrom-Json
-} catch {
-  $domainExists = $false
-}
+$previousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$domainJson = aws apigatewayv2 get-domain-name `
+  --region $Region `
+  --domain-name $DomainName `
+  --output json 2>$null
+$domainLookupExitCode = $LASTEXITCODE
+$ErrorActionPreference = $previousErrorActionPreference
 
-if (-not $domainExists) {
+if ($domainLookupExitCode -eq 0 -and $domainJson) {
+  $domain = $domainJson | ConvertFrom-Json
+} else {
   $domain = aws apigatewayv2 create-domain-name `
     --region $Region `
     --domain-name $DomainName `
@@ -50,7 +51,7 @@ $existingMapping = aws apigatewayv2 get-api-mappings `
   --region $Region `
   --domain-name $DomainName `
   --query "Items[?ApiId=='$apiId'].ApiMappingId | [0]" `
-  --output text
+  --output text 2>$null
 
 if (-not $existingMapping -or $existingMapping -eq "None") {
   aws apigatewayv2 create-api-mapping `

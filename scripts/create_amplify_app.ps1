@@ -9,6 +9,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Invoke-AwsText {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Arguments
+  )
+
+  $output = & aws @Arguments
+  if ($LASTEXITCODE -ne 0) {
+    throw "aws $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
+  }
+  return $output
+}
+
 if (-not $env:GITHUB_TOKEN -and -not $env:GH_TOKEN) {
   throw "Set GITHUB_TOKEN or GH_TOKEN with access to $Repository, then rerun this script."
 }
@@ -21,20 +34,26 @@ $appId = aws amplify list-apps `
   --output text
 
 if (-not $appId -or $appId -eq "None") {
-  $appId = aws amplify create-app `
-    --region $Region `
-    --name $AppName `
-    --repository $Repository `
-    --platform WEB `
-    --access-token $token `
-    --environment-variables "VITE_API_BASE_URL=$ApiBaseUrl" `
-    --query "app.appId" `
-    --output text
+  $appId = Invoke-AwsText @(
+    "amplify", "create-app",
+    "--region", $Region,
+    "--name", $AppName,
+    "--repository", $Repository,
+    "--platform", "WEB",
+    "--access-token", $token,
+    "--environment-variables", "VITE_API_BASE_URL=$ApiBaseUrl",
+    "--query", "app.appId",
+    "--output", "text"
+  )
 } else {
   aws amplify update-app `
     --region $Region `
     --app-id $appId `
     --environment-variables "VITE_API_BASE_URL=$ApiBaseUrl" | Out-Null
+}
+
+if (-not $appId -or $appId -eq "None") {
+  throw "Amplify app id was not returned."
 }
 
 $branchExists = aws amplify list-branches `

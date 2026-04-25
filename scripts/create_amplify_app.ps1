@@ -1,7 +1,7 @@
 param(
   [string]$Region = "us-east-1",
   [string]$AppName = "karkhana",
-  [string]$Repository = "https://github.com/cauldronpumkpin/karkhana",
+  [string]$Repository = "https://github.com/cauldronpumpkin/karkhana.git",
   [string]$BranchName = "main",
   [string]$ApiBaseUrl = "https://api.karkhana.one",
   [string]$DomainName = "karkhana.one"

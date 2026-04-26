@@ -19,6 +19,7 @@ from backend.app.repository import (
     get_repository,
     utcnow,
 )
+from backend.app.services.worker_sqs import WorkerSqsPublisher
 
 CLAIMABLE_STATUSES = {"queued", "waiting_for_machine", "failed_retryable"}
 OPEN_JOB_STATUSES = {"queued", "waiting_for_machine", "failed_retryable", "claimed", "running"}
@@ -38,6 +39,9 @@ def to_jsonable(value: Any) -> Any:
 
 
 class ProjectTwinService:
+    def __init__(self, sqs_publisher: WorkerSqsPublisher | None = None) -> None:
+        self.sqs_publisher = sqs_publisher or WorkerSqsPublisher()
+
     async def import_github_project(self, data: dict[str, Any]) -> dict[str, Any]:
         repo = get_repository()
         owner = (data.get("owner") or "").strip()
@@ -142,7 +146,7 @@ class ProjectTwinService:
         idempotency_key: str | None = None,
         priority: int = 50,
     ) -> WorkItem:
-        return await get_repository().enqueue_work_item(
+        item = await get_repository().enqueue_work_item(
             WorkItem(
                 idea_id=idea_id,
                 project_id=project_id,
@@ -153,6 +157,10 @@ class ProjectTwinService:
                 timeout_seconds=settings.worker_claim_timeout_seconds,
             )
         )
+        project = await get_repository().get_project_twin_by_id(project_id)
+        if project:
+            await self.sqs_publisher.send_job_available(item, project)
+        return item
 
     async def list_jobs(self, idea_id: str | None = None) -> list[dict[str, Any]]:
         await self.requeue_expired_claims()

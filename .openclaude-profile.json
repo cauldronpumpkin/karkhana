@@ -1,0 +1,9 @@
+{
+  "profile": "openai",
+  "env": {
+    "OPENAI_BASE_URL": "https://api.z.ai/api/coding/paas/v4",
+    "OPENAI_MODEL": "opus",
+    "OPENAI_API_KEY": "97d59d8aa6f348e999c54fb31ac9a00a.GPziyCfBSaqUS09e"
+  },
+  "createdAt": "2026-04-26T03:48:13.849Z"
+}

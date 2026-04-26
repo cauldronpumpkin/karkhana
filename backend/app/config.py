@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     worker_auth_token: str = Field(default="", alias="IDEAREFINERY_WORKER_AUTH_TOKEN")
     worker_claim_timeout_seconds: int = Field(default=900, alias="IDEAREFINERY_WORKER_CLAIM_TIMEOUT_SECONDS")
     worker_max_retries: int = Field(default=3, alias="IDEAREFINERY_WORKER_MAX_RETRIES")
+    worker_command_queue_url: str = Field(default="", alias="IDEAREFINERY_WORKER_COMMAND_QUEUE_URL")
+    worker_event_queue_url: str = Field(default="", alias="IDEAREFINERY_WORKER_EVENT_QUEUE_URL")
+    worker_client_role_arn: str = Field(default="", alias="IDEAREFINERY_WORKER_CLIENT_ROLE_ARN")
+    worker_credential_ttl_seconds: int = Field(default=3600, alias="IDEAREFINERY_WORKER_CREDENTIAL_TTL_SECONDS")
+    worker_sqs_region: str = Field(default="us-east-1", alias="IDEAREFINERY_WORKER_SQS_REGION")
     claude_settings_path: str = Field(
         default=str(Path.home() / ".claude" / "settings.json"),
         alias="CLAUDE_SETTINGS_PATH",

@@ -247,6 +247,65 @@ class ProjectCommit:
     created_at: datetime = field(default_factory=utcnow)
 
 
+@dataclass
+class LocalWorker:
+    display_name: str
+    machine_name: str
+    platform: str
+    engine: str = "openclaude"
+    status: str = "approved"
+    capabilities: list[str] = field(default_factory=list)
+    config: dict = field(default_factory=dict)
+    api_token_hash: str | None = None
+    last_seen_at: datetime | None = None
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: datetime = field(default_factory=utcnow)
+    updated_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
+class WorkerConnectionRequest:
+    display_name: str
+    machine_name: str
+    platform: str
+    engine: str = "openclaude"
+    capabilities: list[str] = field(default_factory=list)
+    requested_config: dict = field(default_factory=dict)
+    status: str = "pending"
+    worker_id: str | None = None
+    tenant_id: str | None = None
+    decision_reason: str | None = None
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: datetime = field(default_factory=utcnow)
+    updated_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
+class WorkerCredentialLease:
+    worker_id: str
+    api_token_hash: str
+    access_key_id: str
+    secret_access_key: str
+    session_token: str
+    expires_at: datetime
+    command_queue_url: str = ""
+    event_queue_url: str = ""
+    region: str = "us-east-1"
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
+class WorkerEvent:
+    worker_id: str
+    event_type: str
+    payload: dict = field(default_factory=dict)
+    work_item_id: str | None = None
+    status: str = "received"
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: datetime = field(default_factory=utcnow)
+
+
 class Repository:
     async def create_idea(self, idea: Idea) -> Idea: ...
     async def get_idea(self, idea_id: str) -> Idea | None: ...
@@ -289,6 +348,16 @@ class Repository:
     async def list_agent_runs(self, idea_id: str) -> list[AgentRun]: ...
     async def add_project_commit(self, commit: ProjectCommit) -> ProjectCommit: ...
     async def list_project_commits(self, idea_id: str) -> list[ProjectCommit]: ...
+    async def save_local_worker(self, worker: LocalWorker) -> LocalWorker: ...
+    async def get_local_worker(self, worker_id: str) -> LocalWorker | None: ...
+    async def list_local_workers(self) -> list[LocalWorker]: ...
+    async def save_worker_connection_request(self, request: WorkerConnectionRequest) -> WorkerConnectionRequest: ...
+    async def get_worker_connection_request(self, request_id: str) -> WorkerConnectionRequest | None: ...
+    async def list_worker_connection_requests(self) -> list[WorkerConnectionRequest]: ...
+    async def save_worker_credential_lease(self, lease: WorkerCredentialLease) -> WorkerCredentialLease: ...
+    async def get_worker_credential_lease(self, worker_id: str) -> WorkerCredentialLease | None: ...
+    async def add_worker_event(self, event: WorkerEvent) -> WorkerEvent: ...
+    async def list_worker_events(self, worker_id: str | None = None) -> list[WorkerEvent]: ...
 
 
 class InMemoryRepository(Repository):
@@ -307,6 +376,10 @@ class InMemoryRepository(Repository):
         self.work_items: dict[str, WorkItem] = {}
         self.agent_runs: dict[str, AgentRun] = {}
         self.project_commits: dict[str, ProjectCommit] = {}
+        self.local_workers: dict[str, LocalWorker] = {}
+        self.worker_requests: dict[str, WorkerConnectionRequest] = {}
+        self.worker_leases: dict[str, WorkerCredentialLease] = {}
+        self.worker_events: dict[str, WorkerEvent] = {}
 
     async def create_idea(self, idea: Idea) -> Idea:
         self.ideas[idea.id] = idea
@@ -488,6 +561,45 @@ class InMemoryRepository(Repository):
 
     async def list_project_commits(self, idea_id: str) -> list[ProjectCommit]:
         return sorted([commit for commit in self.project_commits.values() if commit.idea_id == idea_id], key=lambda commit: commit.created_at, reverse=True)
+
+    async def save_local_worker(self, worker: LocalWorker) -> LocalWorker:
+        worker.updated_at = utcnow()
+        self.local_workers[worker.id] = worker
+        return worker
+
+    async def get_local_worker(self, worker_id: str) -> LocalWorker | None:
+        return self.local_workers.get(worker_id)
+
+    async def list_local_workers(self) -> list[LocalWorker]:
+        return sorted(self.local_workers.values(), key=lambda item: item.updated_at, reverse=True)
+
+    async def save_worker_connection_request(self, request: WorkerConnectionRequest) -> WorkerConnectionRequest:
+        request.updated_at = utcnow()
+        self.worker_requests[request.id] = request
+        return request
+
+    async def get_worker_connection_request(self, request_id: str) -> WorkerConnectionRequest | None:
+        return self.worker_requests.get(request_id)
+
+    async def list_worker_connection_requests(self) -> list[WorkerConnectionRequest]:
+        return sorted(self.worker_requests.values(), key=lambda item: item.created_at, reverse=True)
+
+    async def save_worker_credential_lease(self, lease: WorkerCredentialLease) -> WorkerCredentialLease:
+        self.worker_leases[lease.worker_id] = lease
+        return lease
+
+    async def get_worker_credential_lease(self, worker_id: str) -> WorkerCredentialLease | None:
+        return self.worker_leases.get(worker_id)
+
+    async def add_worker_event(self, event: WorkerEvent) -> WorkerEvent:
+        self.worker_events[event.id] = event
+        return event
+
+    async def list_worker_events(self, worker_id: str | None = None) -> list[WorkerEvent]:
+        events = list(self.worker_events.values())
+        if worker_id:
+            events = [event for event in events if event.worker_id == worker_id]
+        return sorted(events, key=lambda item: item.created_at, reverse=True)
 
     async def _refresh_project_queue_count(self, project_id: str) -> None:
         project = await self.get_project_twin_by_id(project_id)
@@ -795,6 +907,89 @@ class DynamoDBRepository(Repository):
     async def list_project_commits(self, idea_id: str) -> list[ProjectCommit]:
         return [self._project_commit(item) for item in self._query_pk(f"IDEA#{idea_id}", "COMMIT#")]
 
+    async def save_local_worker(self, worker: LocalWorker) -> LocalWorker:
+        worker.updated_at = utcnow()
+        self._put({
+            "PK": f"LOCAL_WORKER#{worker.id}",
+            "SK": "METADATA",
+            "entity": "LocalWorker",
+            "GSI1PK": "LOCAL_WORKERS",
+            "GSI1SK": f"{worker.status}#{_iso(worker.updated_at)}#{worker.id}",
+            **worker.__dict__,
+        })
+        return worker
+
+    async def get_local_worker(self, worker_id: str) -> LocalWorker | None:
+        item = self.table.get_item(Key={"PK": f"LOCAL_WORKER#{worker_id}", "SK": "METADATA"}).get("Item")
+        return self._local_worker(_clean_from_dynamo(item)) if item else None
+
+    async def list_local_workers(self) -> list[LocalWorker]:
+        response = self.table.query(
+            IndexName="GSI1",
+            KeyConditionExpression=self._Key("GSI1PK").eq("LOCAL_WORKERS"),
+        )
+        return [self._local_worker(_clean_from_dynamo(item)) for item in response.get("Items", [])]
+
+    async def save_worker_connection_request(self, request: WorkerConnectionRequest) -> WorkerConnectionRequest:
+        request.updated_at = utcnow()
+        self._put({
+            "PK": f"WORKER_REQUEST#{request.id}",
+            "SK": "METADATA",
+            "entity": "WorkerConnectionRequest",
+            "GSI1PK": "WORKER_REQUESTS",
+            "GSI1SK": f"{request.status}#{_iso(request.created_at)}#{request.id}",
+            **request.__dict__,
+        })
+        return request
+
+    async def get_worker_connection_request(self, request_id: str) -> WorkerConnectionRequest | None:
+        item = self.table.get_item(Key={"PK": f"WORKER_REQUEST#{request_id}", "SK": "METADATA"}).get("Item")
+        return self._worker_connection_request(_clean_from_dynamo(item)) if item else None
+
+    async def list_worker_connection_requests(self) -> list[WorkerConnectionRequest]:
+        response = self.table.query(
+            IndexName="GSI1",
+            KeyConditionExpression=self._Key("GSI1PK").eq("WORKER_REQUESTS"),
+        )
+        return [self._worker_connection_request(_clean_from_dynamo(item)) for item in response.get("Items", [])]
+
+    async def save_worker_credential_lease(self, lease: WorkerCredentialLease) -> WorkerCredentialLease:
+        self._put({
+            "PK": f"LOCAL_WORKER#{lease.worker_id}",
+            "SK": "CREDENTIAL_LEASE",
+            "entity": "WorkerCredentialLease",
+            "GSI1PK": "WORKER_CREDENTIAL_LEASES",
+            "GSI1SK": f"{_iso(lease.expires_at)}#{lease.worker_id}",
+            **lease.__dict__,
+        })
+        return lease
+
+    async def get_worker_credential_lease(self, worker_id: str) -> WorkerCredentialLease | None:
+        item = self.table.get_item(Key={"PK": f"LOCAL_WORKER#{worker_id}", "SK": "CREDENTIAL_LEASE"}).get("Item")
+        return self._worker_credential_lease(_clean_from_dynamo(item)) if item else None
+
+    async def add_worker_event(self, event: WorkerEvent) -> WorkerEvent:
+        self._put({
+            "PK": f"LOCAL_WORKER#{event.worker_id}",
+            "SK": f"EVENT#{_iso(event.created_at)}#{event.id}",
+            "entity": "WorkerEvent",
+            "GSI1PK": "WORKER_EVENTS",
+            "GSI1SK": f"{_iso(event.created_at)}#{event.id}",
+            **event.__dict__,
+        })
+        return event
+
+    async def list_worker_events(self, worker_id: str | None = None) -> list[WorkerEvent]:
+        if worker_id:
+            raw = self._query_pk(f"LOCAL_WORKER#{worker_id}", "EVENT#")
+        else:
+            response = self.table.query(
+                IndexName="GSI1",
+                KeyConditionExpression=self._Key("GSI1PK").eq("WORKER_EVENTS"),
+            )
+            raw = [_clean_from_dynamo(item) for item in response.get("Items", [])]
+        return sorted([self._worker_event(item) for item in raw], key=lambda item: item.created_at, reverse=True)
+
     def _idea(self, item: dict[str, Any]) -> Idea:
         return Idea(id=item["id"], title=item["title"], slug=item["slug"], description=item["description"], current_phase=item.get("current_phase", "capture"), status=item.get("status", "active"), source_type=item.get("source_type", "manual"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
 
@@ -833,6 +1028,18 @@ class DynamoDBRepository(Repository):
 
     def _project_commit(self, item: dict[str, Any]) -> ProjectCommit:
         return ProjectCommit(id=item["id"], idea_id=item["idea_id"], project_id=item["project_id"], work_item_id=item["work_item_id"], branch_name=item["branch_name"], commit_sha=item["commit_sha"], message=item["message"], author=item.get("author"), status=item.get("status", "pushed"), created_at=_dt(item.get("created_at")) or utcnow())
+
+    def _local_worker(self, item: dict[str, Any]) -> LocalWorker:
+        return LocalWorker(id=item["id"], display_name=item["display_name"], machine_name=item["machine_name"], platform=item["platform"], engine=item.get("engine", "openclaude"), status=item.get("status", "approved"), capabilities=item.get("capabilities") or [], config=item.get("config") or {}, api_token_hash=item.get("api_token_hash"), last_seen_at=_dt(item.get("last_seen_at")), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
+
+    def _worker_connection_request(self, item: dict[str, Any]) -> WorkerConnectionRequest:
+        return WorkerConnectionRequest(id=item["id"], display_name=item["display_name"], machine_name=item["machine_name"], platform=item["platform"], engine=item.get("engine", "openclaude"), capabilities=item.get("capabilities") or [], requested_config=item.get("requested_config") or {}, status=item.get("status", "pending"), worker_id=item.get("worker_id"), decision_reason=item.get("decision_reason"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
+
+    def _worker_credential_lease(self, item: dict[str, Any]) -> WorkerCredentialLease:
+        return WorkerCredentialLease(id=item["id"], worker_id=item["worker_id"], api_token_hash=item["api_token_hash"], access_key_id=item.get("access_key_id", ""), secret_access_key=item.get("secret_access_key", ""), session_token=item.get("session_token", ""), expires_at=_dt(item.get("expires_at")) or utcnow(), command_queue_url=item.get("command_queue_url", ""), event_queue_url=item.get("event_queue_url", ""), region=item.get("region", "us-east-1"), created_at=_dt(item.get("created_at")) or utcnow())
+
+    def _worker_event(self, item: dict[str, Any]) -> WorkerEvent:
+        return WorkerEvent(id=item["id"], worker_id=item["worker_id"], event_type=item["event_type"], payload=item.get("payload") or {}, work_item_id=item.get("work_item_id"), status=item.get("status", "received"), created_at=_dt(item.get("created_at")) or utcnow())
 
 
 _repo: Repository | None = None

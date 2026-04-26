@@ -28,6 +28,8 @@ python -m pip install --upgrade --target $PackageDir `
   python-multipart `
   httpx `
   boto3 `
+  PyJWT `
+  cryptography `
   pydantic-settings
 Copy-Item -Path (Join-Path $Root "backend") -Destination $PackageDir -Recurse -Force
 

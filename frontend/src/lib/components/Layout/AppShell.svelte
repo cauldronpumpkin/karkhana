@@ -9,7 +9,8 @@
     chat: 'Chat',
     project: 'Project Twin',
     reports: 'Reports',
-    actions: 'Research Actions'
+    actions: 'Research Actions',
+    workers: 'Local Workers'
   };
 
   function navigateActive(route) {

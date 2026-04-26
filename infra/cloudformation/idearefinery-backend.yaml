@@ -78,6 +78,84 @@ Resources:
         - Key: app
           Value: idearefinery
 
+  WorkerCommandDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: idearefinery-worker-commands-dlq.fifo
+      FifoQueue: true
+      MessageRetentionPeriod: 1209600
+      Tags:
+        - Key: app
+          Value: idearefinery
+
+  WorkerCommandQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: idearefinery-worker-commands.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      VisibilityTimeout: 1800
+      ReceiveMessageWaitTimeSeconds: 20
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt WorkerCommandDeadLetterQueue.Arn
+        maxReceiveCount: 5
+      Tags:
+        - Key: app
+          Value: idearefinery
+
+  WorkerEventDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: idearefinery-worker-events-dlq.fifo
+      FifoQueue: true
+      MessageRetentionPeriod: 1209600
+      Tags:
+        - Key: app
+          Value: idearefinery
+
+  WorkerEventQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: idearefinery-worker-events.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      VisibilityTimeout: 180
+      ReceiveMessageWaitTimeSeconds: 10
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt WorkerEventDeadLetterQueue.Arn
+        maxReceiveCount: 5
+      Tags:
+        - Key: app
+          Value: idearefinery
+
+  WorkerClientRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: idearefinery-worker-client-prod-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: idearefinery-worker-client-sqs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt WorkerCommandQueue.Arn
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt WorkerEventQueue.Arn
+
   BackendLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -115,6 +193,21 @@ Resources:
                 Resource:
                   - !GetAtt IdeaRefineryTable.Arn
                   - !Sub "${IdeaRefineryTable.Arn}/index/*"
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt WorkerCommandQueue.Arn
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt WorkerEventQueue.Arn
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource: !GetAtt WorkerClientRole.Arn
 
   BackendFunction:
     Type: AWS::Lambda::Function
@@ -141,6 +234,11 @@ Resources:
           IDEAREFINERY_WORKER_AUTH_TOKEN: !Ref WorkerAuthToken
           IDEAREFINERY_WORKER_CLAIM_TIMEOUT_SECONDS: "900"
           IDEAREFINERY_WORKER_MAX_RETRIES: "3"
+          IDEAREFINERY_WORKER_COMMAND_QUEUE_URL: !Ref WorkerCommandQueue
+          IDEAREFINERY_WORKER_EVENT_QUEUE_URL: !Ref WorkerEventQueue
+          IDEAREFINERY_WORKER_CLIENT_ROLE_ARN: !GetAtt WorkerClientRole.Arn
+          IDEAREFINERY_WORKER_SQS_REGION: !Ref AWS::Region
+          IDEAREFINERY_WORKER_CREDENTIAL_TTL_SECONDS: "3600"
       Code:
         ZipFile: |
           def handler(event, context):
@@ -209,6 +307,14 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*/*"
 
+  WorkerEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt WorkerEventQueue.Arn
+      FunctionName: !Ref BackendFunction
+      BatchSize: 10
+      Enabled: true
+
 Outputs:
   ApiEndpoint:
     Description: HTTP API invoke URL for frontend VITE_API_BASE_URL.
@@ -219,3 +325,12 @@ Outputs:
   LambdaFunctionName:
     Description: Lambda function name.
     Value: !Ref BackendFunction
+  WorkerCommandQueueUrl:
+    Description: FIFO queue URL for local worker commands.
+    Value: !Ref WorkerCommandQueue
+  WorkerEventQueueUrl:
+    Description: FIFO queue URL for local worker events.
+    Value: !Ref WorkerEventQueue
+  WorkerClientRoleArn:
+    Description: Role assumed by the backend to issue scoped local worker SQS credentials.
+    Value: !GetAtt WorkerClientRole.Arn

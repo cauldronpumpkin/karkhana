@@ -1,0 +1,26 @@
+{
+  "api_base": "http://localhost:8000",
+  "display_name": "OpenClaude local worker",
+  "engine": "openclaude",
+  "allow_full_control": false,
+  "workspace_root": "~/.idearefinery-worker/repos",
+  "poll_seconds": 20,
+  "capabilities": [
+    "repo_index",
+    "architecture_dossier",
+    "gap_analysis",
+    "build_task_plan",
+    "agent_branch_work",
+    "test_verify",
+    "sync_remote_state"
+  ],
+  "openclaude": {
+    "model": "",
+    "agent": "Explore",
+    "permission_mode": "acceptEdits",
+    "output_format": "text",
+    "max_budget_usd": "",
+    "system_prompt": "You are an IdeaRefinery local coding worker. Keep changes scoped, produce branches, run tests, and never merge main unless explicitly authorized.",
+    "additional_dirs": []
+  }
+}

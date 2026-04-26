@@ -18,6 +18,7 @@ from backend.app.routers.build import router as build_router
 from backend.app.routers.github import router as github_router
 from backend.app.routers.projects import router as projects_router
 from backend.app.routers.worker import router as worker_router
+from backend.app.routers.local_workers import router as local_workers_router
 
 
 app = FastAPI(title="Idea Refinery")
@@ -46,6 +47,7 @@ app.include_router(build_router)
 app.include_router(github_router)
 app.include_router(projects_router)
 app.include_router(worker_router)
+app.include_router(local_workers_router)
 
 
 @app.get("/api/health")

@@ -6,6 +6,7 @@
   import Reports from './lib/components/Reports/Reports.svelte';
   import Actions from './lib/components/Actions/Actions.svelte';
   import ProjectTwinView from './lib/components/ProjectTwin/ProjectTwinView.svelte';
+  import LocalWorkers from './lib/components/LocalWorkers/LocalWorkers.svelte';
   import CreateIdea from './lib/components/Dashboard/CreateIdea.svelte';
   import { api } from './lib/api.js';
 
@@ -55,6 +56,9 @@
       currentRoute = 'project';
       routeParams = { ideaId: parts[1] };
       setActiveIdea(parts[1]);
+    } else if (parts[0] === 'workers') {
+      currentRoute = 'workers';
+      routeParams = {};
     } else {
       currentRoute = 'dashboard';
       routeParams = {};
@@ -94,6 +98,8 @@
     <Actions ideaId={routeParams.ideaId} />
   {:else if currentRoute === 'project'}
     <ProjectTwinView ideaId={routeParams.ideaId} />
+  {:else if currentRoute === 'workers'}
+    <LocalWorkers />
   {/if}
 </AppShell>
 

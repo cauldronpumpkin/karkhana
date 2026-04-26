@@ -4,6 +4,7 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.app.config import settings
+from backend.app.services.local_workers import LocalWorkerService
 from backend.app.services.project_twin import ProjectTwinService
 
 router = APIRouter(prefix="/api/worker", tags=["worker"])
@@ -18,8 +19,17 @@ def get_service() -> ProjectTwinService:
     return _service
 
 
-def verify_worker(x_idearefinery_worker_token: str | None) -> None:
-    if settings.worker_auth_token and x_idearefinery_worker_token != settings.worker_auth_token:
+async def verify_worker(worker_id: str, x_idearefinery_worker_token: str | None, authorization: str | None) -> None:
+    if settings.worker_auth_token and x_idearefinery_worker_token == settings.worker_auth_token:
+        return
+    token = (authorization or "").removeprefix("Bearer ").strip()
+    if token:
+        try:
+            await LocalWorkerService().verify_worker_token(worker_id, token)
+            return
+        except (PermissionError, ValueError) as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+    if settings.worker_auth_token:
         raise HTTPException(status_code=401, detail="Invalid worker token")
 
 
@@ -44,15 +54,15 @@ class JobFailRequest(JobUpdateRequest):
 
 
 @router.post("/claim")
-async def claim_job(body: ClaimRequest, x_idearefinery_worker_token: str | None = Header(default=None)):
-    verify_worker(x_idearefinery_worker_token)
+async def claim_job(body: ClaimRequest, x_idearefinery_worker_token: str | None = Header(default=None), authorization: str | None = Header(default=None)):
+    await verify_worker(body.worker_id, x_idearefinery_worker_token, authorization)
     claim = await get_service().claim_job(body.worker_id, body.capabilities)
     return {"claim": claim}
 
 
 @router.post("/jobs/{job_id}/heartbeat")
-async def heartbeat_job(job_id: str, body: JobUpdateRequest, x_idearefinery_worker_token: str | None = Header(default=None)):
-    verify_worker(x_idearefinery_worker_token)
+async def heartbeat_job(job_id: str, body: JobUpdateRequest, x_idearefinery_worker_token: str | None = Header(default=None), authorization: str | None = Header(default=None)):
+    await verify_worker(body.worker_id, x_idearefinery_worker_token, authorization)
     try:
         return {"job": await get_service().heartbeat_job(job_id, body.claim_token, body.worker_id, body.logs)}
     except ValueError as exc:
@@ -60,8 +70,8 @@ async def heartbeat_job(job_id: str, body: JobUpdateRequest, x_idearefinery_work
 
 
 @router.post("/jobs/{job_id}/complete")
-async def complete_job(job_id: str, body: JobCompleteRequest, x_idearefinery_worker_token: str | None = Header(default=None)):
-    verify_worker(x_idearefinery_worker_token)
+async def complete_job(job_id: str, body: JobCompleteRequest, x_idearefinery_worker_token: str | None = Header(default=None), authorization: str | None = Header(default=None)):
+    await verify_worker(body.worker_id, x_idearefinery_worker_token, authorization)
     try:
         return {"job": await get_service().complete_job(job_id, body.claim_token, body.worker_id, body.result, body.logs)}
     except ValueError as exc:
@@ -69,8 +79,8 @@ async def complete_job(job_id: str, body: JobCompleteRequest, x_idearefinery_wor
 
 
 @router.post("/jobs/{job_id}/fail")
-async def fail_job(job_id: str, body: JobFailRequest, x_idearefinery_worker_token: str | None = Header(default=None)):
-    verify_worker(x_idearefinery_worker_token)
+async def fail_job(job_id: str, body: JobFailRequest, x_idearefinery_worker_token: str | None = Header(default=None), authorization: str | None = Header(default=None)):
+    await verify_worker(body.worker_id, x_idearefinery_worker_token, authorization)
     try:
         return {"job": await get_service().fail_job(job_id, body.claim_token, body.worker_id, body.error, body.retryable, body.logs)}
     except ValueError as exc:

@@ -9,6 +9,7 @@
     MessageCircle,
     Plug,
     Settings,
+    ServerCog,
     TerminalSquare,
     UploadCloud
   } from 'lucide-svelte';
@@ -24,6 +25,7 @@
   ];
 
   const resources = [
+    { name: 'Local Workers', route: 'workers', icon: ServerCog },
     { name: 'Templates', icon: Blocks },
     { name: 'Prompt Library', icon: TerminalSquare },
     { name: 'Integrations', icon: Plug },
@@ -38,7 +40,9 @@
 
 <nav class="sidebar" aria-label="Primary navigation">
   <a class="brand" href="#/dashboard" aria-label="IdeaRefinery dashboard">
-    <span class="brand-mark"><Box size={23} /></span>
+    <span class="brand-mark">
+      <img src="/logo.png" alt="Logo" width="20" height="20" />
+    </span>
     <span>IdeaRefinery</span>
     <span class="prompt">&gt;_</span>
   </a>
@@ -73,7 +77,7 @@
     <p>Tools</p>
     {#each resources as item}
       {@const Icon = item.icon}
-      <a href="#/dashboard" class="nav-link subtle">
+      <a href={item.route ? `#/${item.route}` : '#/dashboard'} class="nav-link" class:active={currentRoute === item.route} class:subtle={!item.route}>
         <Icon size={16} />
         <span>{item.name}</span>
       </a>
@@ -133,13 +137,18 @@
 
   .brand-mark {
     align-items: center;
-    border: 1px solid var(--color-accent);
     border-radius: 8px;
-    color: var(--color-accent);
     display: inline-flex;
     height: 34px;
     justify-content: center;
     width: 34px;
+    overflow: hidden;
+  }
+
+  .brand-mark img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
   }
 
   .prompt {

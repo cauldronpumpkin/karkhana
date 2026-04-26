@@ -399,6 +399,14 @@ def default_state_path() -> Path:
 
 
 def main() -> int:
+    print("=" * 70)
+    print("DEPRECATION WARNING")
+    print("=" * 70)
+    print("The Python CLI worker is deprecated. Use the Tauri worker app")
+    print("(worker-app/) instead, which supports OpenCode server mode,")
+    print("LiteLLM proxy, circuit breakers, and SQS checkpoint events.")
+    print("=" * 70)
+    print()
     parser = argparse.ArgumentParser(description="IdeaRefinery OpenClaude local worker")
     parser.add_argument("command", choices=["pair", "run", "once"])
     parser.add_argument("--api-base", default=None)

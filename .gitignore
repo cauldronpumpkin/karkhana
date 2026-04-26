@@ -13,3 +13,5 @@ test-results/
 playwright-report/
 coverage/
 *.log
+litellm.pid
+graphify-out/cache/

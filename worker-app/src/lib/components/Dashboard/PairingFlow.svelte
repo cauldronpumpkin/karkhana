@@ -14,6 +14,7 @@
   let tenantId = $state('')
   let workerAuthToken = $state('')
   let workerId = $state('')
+  let inviteLink = $state('')
   let status = $state(null)
   let error = $state('')
 
@@ -58,6 +59,21 @@
     }
   }
 
+  async function handleInviteLinkSubmit() {
+    error = ''
+    if (!inviteLink.trim()) {
+      error = 'Invite link is required'
+      return
+    }
+    try {
+      await invoke('pair_with_invite_link', {
+        inviteLink: inviteLink.trim(),
+      })
+    } catch (e) {
+      error = e
+    }
+  }
+
   onMount(() => {
     const unlisten = listen('pairing-status-changed', (event) => {
       pairingStatus.set(event.payload)
@@ -79,6 +95,11 @@
         class:active={mode === 'dev'}
         onclick={() => mode = 'dev'}
       >Dev Token</button>
+      <button
+        class="mode-btn"
+        class:active={mode === 'invite'}
+        onclick={() => mode = 'invite'}
+      >Invite Link</button>
     </div>
 
     {#if mode === 'dashboard'}
@@ -111,6 +132,22 @@
         {/if}
         <div class="actions">
           <Button type="submit">Pair with Dev Token</Button>
+        </div>
+      </form>
+    {:else}
+      <form onsubmit={(e) => { e.preventDefault(); handleInviteLinkSubmit(); }}>
+        <div class="form-fields">
+          <Input label="Invite Link" bind:value={inviteLink} placeholder="idearefinery://connect?api_base=...&amp;token=..." />
+        </div>
+        <p class="hint">
+          Paste the invite link from your web app dashboard.
+          Includes API URL, auth token, and worker ID.
+        </p>
+        {#if error}
+          <p class="error">{error}</p>
+        {/if}
+        <div class="actions">
+          <Button type="submit">Connect</Button>
         </div>
       </form>
     {/if}

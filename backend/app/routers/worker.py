@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from backend.app.config import settings
@@ -33,6 +33,11 @@ async def verify_worker(worker_id: str, x_idearefinery_worker_token: str | None,
         raise HTTPException(status_code=401, detail="Invalid worker token")
 
 
+class InviteLinkRequest(BaseModel):
+    worker_id: str | None = Field(default=None, min_length=1)
+    api_base: str | None = Field(default=None)
+
+
 class ClaimRequest(BaseModel):
     worker_id: str = Field(..., min_length=1)
     capabilities: list[str] | None = None
@@ -51,6 +56,37 @@ class JobCompleteRequest(JobUpdateRequest):
 class JobFailRequest(JobUpdateRequest):
     error: str = Field(..., min_length=1)
     retryable: bool = True
+
+
+@router.get("/invite-link")
+async def get_invite_link(
+    api_base: str | None = Query(default=None),
+    worker_id: str | None = Query(default=None),
+):
+    """Generate an invite link for worker pairing."""
+    if not settings.worker_auth_token:
+        raise HTTPException(status_code=503, detail="Worker auth token not configured on server")
+
+    import urllib.parse
+
+    resolved_base = (api_base or "").rstrip("/") or None
+    if not resolved_base:
+        raise HTTPException(status_code=400, detail="api_base query parameter is required")
+
+    resolved_worker_id = worker_id or "local-worker"
+
+    params = urllib.parse.urlencode({
+        "api_base": resolved_base,
+        "token": settings.worker_auth_token,
+        "w": resolved_worker_id,
+    })
+    invite_link = f"idearefinery://connect?{params}"
+
+    return {
+        "invite_link": invite_link,
+        "worker_id": resolved_worker_id,
+        "api_base": resolved_base,
+    }
 
 
 @router.post("/claim")

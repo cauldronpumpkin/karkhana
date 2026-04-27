@@ -59,8 +59,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            pairing::start_pairing,
-            pairing::pair_with_dev_token,
             pairing::pair_with_invite_link,
             worker::start_worker,
             worker::stop_worker,

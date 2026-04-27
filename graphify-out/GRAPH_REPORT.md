@@ -1,12 +1,12 @@
-# Graph Report - .  (2026-04-26)
+# Graph Report - .  (2026-04-27)
 
 ## Corpus Check
-- 168 files · ~116,712 words
+- 168 files · ~116,057 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1278 nodes · 2961 edges · 110 communities detected
-- Extraction: 58% EXTRACTED · 42% INFERRED · 0% AMBIGUOUS · INFERRED: 1231 edges (avg confidence: 0.71)
+- 1275 nodes · 2947 edges · 110 communities detected
+- Extraction: 59% EXTRACTED · 41% INFERRED · 0% AMBIGUOUS · INFERRED: 1222 edges (avg confidence: 0.7)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
@@ -136,80 +136,80 @@
 ## Surprising Connections (you probably didn't know these)
 - `ProjectMemory` --uses--> `Service for managing project memory entries.`  [INFERRED]
   backend\app\repository.py → backend\app\services\memory.py
-- `GitHubInstallation` --uses--> `GitHub App helper for installation metadata and short-lived tokens.`  [INFERRED]
-  backend\app\repository.py → backend\app\services\github_app.py
 - `handler()` --calls--> `run()`  [INFERRED]
   backend\app\lambda_handler.py → worker-app\src-tauri\src\lib.rs
 - `utcnow()` --calls--> `test_revoked_and_expired_workers_cannot_submit_events()`  [INFERRED]
   backend\app\repository.py → backend\tests\test_local_workers_api.py
 - `Idea` --uses--> `ProjectTwinService`  [INFERRED]
   backend\app\repository.py → backend\app\services\project_twin.py
+- `Idea` --uses--> `RelationshipService`  [INFERRED]
+  backend\app\repository.py → backend\app\services\relationships.py
 
 ## Communities
 
 ### Community 0 - "Community 0"
-Cohesion: 0.03
-Nodes (80): EngineMode, resolve_engine_mode(), run_agent(), run_cli_agent(), run_command(), run_server_agent(), run_server_agent_session(), ServerAgentResult (+72 more)
+Cohesion: 0.02
+Nodes (142): list_ai_models(), get_build_prompts(), get_current_step(), get_service(), BuildHandoffService, Generate a comprehensive Prometheus planning prompt for the entire project., Generate a comprehensive Prometheus planning prompt for the entire project., Generate step-by-step build prompts for Prometheus. (+134 more)
 
 ### Community 1 - "Community 1"
-Cohesion: 0.03
-Nodes (103): list_ai_models(), get_build_prompts(), get_current_step(), get_service(), BuildHandoffService, Generate a comprehensive Prometheus planning prompt for the entire project., Generate a comprehensive Prometheus planning prompt for the entire project., Generate step-by-step build prompts for Prometheus. (+95 more)
+Cohesion: 0.02
+Nodes (82): EngineMode, resolve_engine_mode(), run_agent(), run_cli_agent(), run_command(), run_server_agent(), run_server_agent_session(), ServerAgentResult (+74 more)
 
 ### Community 2 - "Community 2"
-Cohesion: 0.04
-Nodes (11): _clean_for_dynamo(), _clean_from_dynamo(), CodeIndexArtifact, _dt(), DynamoDBRepository, GitHubInstallation, InMemoryRepository, _iso() (+3 more)
+Cohesion: 0.05
+Nodes (39): handler(), approve_request(), deny_request(), DenyRequest, get_registration(), get_service(), hash_token(), list_requests() (+31 more)
 
 ### Community 3 - "Community 3"
-Cohesion: 0.06
-Nodes (66): _build_context(), ChatMessageRequest, get_chat_history(), send_chat_message(), websocket_chat(), db_session(), FakeSession, mock_llm() (+58 more)
+Cohesion: 0.04
+Nodes (52): process_logo(), SqsMessage, SqsTransport, Tests for the Chat API (REST endpoints; WebSocket tested via REST history)., Happy path: GET chat history for idea with no messages returns empty list., Edge case: GET chat history for nonexistent idea returns 404., Happy path: POST chat message returns assistant response., Edge case: POST chat message for nonexistent idea returns 404. (+44 more)
 
 ### Community 4 - "Community 4"
-Cohesion: 0.04
-Nodes (51): SqsMessage, SqsTransport, Tests for the Chat API (REST endpoints; WebSocket tested via REST history)., Happy path: GET chat history for idea with no messages returns empty list., Edge case: GET chat history for nonexistent idea returns 404., Happy path: POST chat message returns assistant response., Edge case: POST chat message for nonexistent idea returns 404., test_get_chat_history_empty() (+43 more)
+Cohesion: 0.07
+Nodes (49): db_session(), FakeSession, mock_llm(), MockLLMService, Test fixtures for Idea Refinery backend tests., Mock LLM service that returns canned responses., sample_idea(), sample_idea_two() (+41 more)
 
 ### Community 5 - "Community 5"
 Cohesion: 0.07
-Nodes (42): handler(), approve_request(), deny_request(), DenyRequest, get_registration(), get_service(), hash_token(), list_requests() (+34 more)
+Nodes (49): _build_context(), get_chat_history(), send_chat_message(), websocket_chat(), create_idea(), delete_idea(), _get_composite_score(), get_idea() (+41 more)
 
 ### Community 6 - "Community 6"
 Cohesion: 0.04
-Nodes (1): Repository
+Nodes (1): InMemoryRepository
 
 ### Community 7 - "Community 7"
-Cohesion: 0.1
-Nodes (39): create_or_update_memory(), delete_memory(), get_all_global_memory(), get_idea_memory(), get_service(), _memory_to_dict(), MemoryCreate, MemoryResponse (+31 more)
+Cohesion: 0.08
+Nodes (42): create_relationship(), CreateRelationshipRequest, derive_idea(), DeriveRequest, get_relationships(), get_service(), _idea_dict(), merge_ideas() (+34 more)
 
 ### Community 8 - "Community 8"
-Cohesion: 0.09
-Nodes (39): create_relationship(), CreateRelationshipRequest, derive_idea(), DeriveRequest, get_relationships(), get_service(), merge_ideas(), MergeRequest (+31 more)
+Cohesion: 0.04
+Nodes (1): Repository
 
 ### Community 9 - "Community 9"
-Cohesion: 0.1
-Nodes (35): compare_ideas(), CompareRequest, get_composite_score(), get_scores(), get_service(), AI scores idea on all 7 dimensions., Get all scores for an idea., Get composite (weighted average) score. (+27 more)
+Cohesion: 0.11
+Nodes (37): BaseModel, ChatMessageRequest, _extract_topic(), generate_research_prompts(), GenerateResponse, get_service(), integrate_research(), IntegrateResponse (+29 more)
 
 ### Community 10 - "Community 10"
-Cohesion: 0.11
-Nodes (37): BaseModel, _extract_topic(), generate_research_prompts(), GenerateResponse, get_service(), integrate_research(), IntegrateResponse, list_research_tasks() (+29 more)
-
-### Community 11 - "Community 11"
-Cohesion: 0.09
-Nodes (29): check_updates(), run(), main(), CopyTo(), create_shortcut(), fixup_dbi(), get_root_hkey(), get_shortcuts_folder() (+21 more)
-
-### Community 12 - "Community 12"
 Cohesion: 0.07
 Nodes (23): BranchWorkResult, ClaimRequest, ClaimResponse, FileEntry, Job, JobClaim, JobCompleteRequest, JobFailRequest (+15 more)
 
+### Community 11 - "Community 11"
+Cohesion: 0.14
+Nodes (23): CopyTo(), create_shortcut(), fixup_dbi(), get_root_hkey(), get_shortcuts_folder(), get_special_folder_path(), get_system_dir(), install() (+15 more)
+
+### Community 12 - "Community 12"
+Cohesion: 0.14
+Nodes (7): GitHubAppService, GitHub App helper for installation metadata and short-lived tokens., get_service(), github_app_webhook(), list_installation_repos(), GitHubInstallation, WorkerSqsPublisher
+
 ### Community 13 - "Community 13"
-Cohesion: 0.15
-Nodes (6): GitHubAppService, GitHub App helper for installation metadata and short-lived tokens., get_service(), github_app_webhook(), list_installation_repos(), WorkerSqsPublisher
+Cohesion: 0.13
+Nodes (10): main(), _RateLimiter, Synchronous DuckDuckGo search call., Return cached results if still valid., Store results in cache., Simple in-memory sliding window rate limiter., Web search service using DuckDuckGo with rate limiting and caching., Search the web and return list of {title, url, snippet}.          Returns empty (+2 more)
 
 ### Community 14 - "Community 14"
 Cohesion: 0.14
 Nodes (14): Base, Compatibility placeholder; production persistence is DynamoDB-backed., _mock_chat_completion(), _mock_chat_completion_sync(), _mock_llm_init(), Test server entry point with mocked LLM service.  This module patches all LLM ca, Drop and recreate database tables for clean test state., Replace LLMService init to avoid real API connections. (+6 more)
 
 ### Community 15 - "Community 15"
-Cohesion: 0.15
-Nodes (9): _RateLimiter, Synchronous DuckDuckGo search call., Return cached results if still valid., Store results in cache., Simple in-memory sliding window rate limiter., Web search service using DuckDuckGo with rate limiting and caching., Search the web and return list of {title, url, snippet}.          Returns empty, Fetch a URL and extract readable text.          Returns empty string on failure (+1 more)
+Cohesion: 0.28
+Nodes (12): claim_job(), ClaimRequest, complete_job(), fail_job(), get_invite_link(), get_service(), heartbeat_job(), JobCompleteRequest (+4 more)
 
 ### Community 16 - "Community 16"
 Cohesion: 0.15
@@ -321,7 +321,7 @@ Nodes (0):
 
 ### Community 43 - "Community 43"
 Cohesion: 1.0
-Nodes (1): active
+Nodes (0): 
 
 ### Community 44 - "Community 44"
 Cohesion: 1.0
@@ -588,7 +588,7 @@ Cohesion: 1.0
 Nodes (1): Return formatted memory text for inclusion in LLM system prompts.
 
 ## Knowledge Gaps
-- **94 isolated node(s):** `Compatibility placeholder; production persistence is DynamoDB-backed.`, `Simple in-memory sliding window rate limiter.`, `Web search service using DuckDuckGo with rate limiting and caching.`, `Search the web and return list of {title, url, snippet}.          Returns empty`, `Fetch a URL and extract readable text.          Returns empty string on failure` (+89 more)
+- **93 isolated node(s):** `Compatibility placeholder; production persistence is DynamoDB-backed.`, `Simple in-memory sliding window rate limiter.`, `Web search service using DuckDuckGo with rate limiting and caching.`, `Search the web and return list of {title, url, snippet}.          Returns empty`, `Fetch a URL and extract readable text.          Returns empty string on failure` (+88 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **Thin community `Community 34`** (2 nodes): `test_enqueue.py`, `req()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
@@ -608,77 +608,77 @@ Nodes (1): Return formatted memory text for inclusion in LLM system prompts.
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 42`** (2 nodes): `App.svelte`, `main.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 43`** (2 nodes): `active`, `PairingFlow.svelte`
+- **Thin community `Community 43`** (2 nodes): `statusVariant()`, `StatusPanel.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 44`** (2 nodes): `statusVariant()`, `StatusPanel.svelte`
+- **Thin community `Community 44`** (2 nodes): `main()`, `build.rs`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 45`** (2 nodes): `main()`, `build.rs`
+- **Thin community `Community 45`** (1 nodes): `playwright.config.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 46`** (1 nodes): `playwright.config.js`
+- **Thin community `Community 46`** (1 nodes): `start.ps1`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 47`** (1 nodes): `start.ps1`
+- **Thin community `Community 47`** (1 nodes): `__init__.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 48`** (1 nodes): `__init__.py`
+- **Thin community `Community 48`** (1 nodes): `database.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 49`** (1 nodes): `database.py`
+- **Thin community `Community 49`** (1 nodes): `__init__.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 50`** (1 nodes): `__init__.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 51`** (1 nodes): `__init__.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 52`** (1 nodes): `__init__.py`
+- **Thin community `Community 52`** (1 nodes): `idea-lifecycle.spec.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 53`** (1 nodes): `idea-lifecycle.spec.js`
+- **Thin community `Community 53`** (1 nodes): `idea-relationships.spec.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 54`** (1 nodes): `idea-relationships.spec.js`
+- **Thin community `Community 54`** (1 nodes): `research-flow.spec.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 55`** (1 nodes): `research-flow.spec.js`
+- **Thin community `Community 55`** (1 nodes): `svelte.config.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 56`** (1 nodes): `svelte.config.js`
+- **Thin community `Community 56`** (1 nodes): `vite.config.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 57`** (1 nodes): `vite.config.js`
+- **Thin community `Community 57`** (1 nodes): `Counter.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 58`** (1 nodes): `Counter.svelte`
+- **Thin community `Community 58`** (1 nodes): `api.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 59`** (1 nodes): `api.js`
+- **Thin community `Community 59`** (1 nodes): `BuildQueue.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 60`** (1 nodes): `BuildQueue.svelte`
+- **Thin community `Community 60`** (1 nodes): `FileUpload.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 61`** (1 nodes): `FileUpload.svelte`
+- **Thin community `Community 61`** (1 nodes): `ResearchTaskCard.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 62`** (1 nodes): `ResearchTaskCard.svelte`
+- **Thin community `Community 62`** (1 nodes): `ChatInput.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 63`** (1 nodes): `ChatInput.svelte`
+- **Thin community `Community 63`** (1 nodes): `MarkdownRenderer.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 64`** (1 nodes): `MarkdownRenderer.svelte`
+- **Thin community `Community 64`** (1 nodes): `MessageBubble.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 65`** (1 nodes): `MessageBubble.svelte`
+- **Thin community `Community 65`** (1 nodes): `MessageList.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 66`** (1 nodes): `MessageList.svelte`
+- **Thin community `Community 66`** (1 nodes): `PhaseIndicator.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 67`** (1 nodes): `PhaseIndicator.svelte`
+- **Thin community `Community 67`** (1 nodes): `CreateIdea.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 68`** (1 nodes): `CreateIdea.svelte`
+- **Thin community `Community 68`** (1 nodes): `ImportProject.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 69`** (1 nodes): `ImportProject.svelte`
+- **Thin community `Community 69`** (1 nodes): `ScoreBar.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 70`** (1 nodes): `ScoreBar.svelte`
+- **Thin community `Community 70`** (1 nodes): `AppShell.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 71`** (1 nodes): `AppShell.svelte`
+- **Thin community `Community 71`** (1 nodes): `Sidebar.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 72`** (1 nodes): `Sidebar.svelte`
+- **Thin community `Community 72`** (1 nodes): `ReportViewer.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 73`** (1 nodes): `ReportViewer.svelte`
+- **Thin community `Community 73`** (1 nodes): `Badge.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 74`** (1 nodes): `Badge.svelte`
+- **Thin community `Community 74`** (1 nodes): `Card.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 75`** (1 nodes): `Card.svelte`
+- **Thin community `Community 75`** (1 nodes): `Input.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 76`** (1 nodes): `Input.svelte`
+- **Thin community `Community 76`** (1 nodes): `Modal.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 77`** (1 nodes): `Modal.svelte`
+- **Thin community `Community 77`** (1 nodes): `app-stores.svelte.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 78`** (1 nodes): `app-stores.svelte.js`
+- **Thin community `Community 78`** (1 nodes): `+page.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 79`** (1 nodes): `+page.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
@@ -686,21 +686,21 @@ Nodes (1): Return formatted memory text for inclusion in LLM system prompts.
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 81`** (1 nodes): `+page.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 82`** (1 nodes): `+page.svelte`
+- **Thin community `Community 82`** (1 nodes): `activate_this.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 83`** (1 nodes): `activate_this.py`
+- **Thin community `Community 83`** (1 nodes): `configure_api_custom_domain.ps1`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 84`** (1 nodes): `configure_api_custom_domain.ps1`
+- **Thin community `Community 84`** (1 nodes): `deploy_aws_backend.ps1`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 85`** (1 nodes): `deploy_aws_backend.ps1`
+- **Thin community `Community 85`** (1 nodes): `vite.config.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 86`** (1 nodes): `vite.config.js`
+- **Thin community `Community 86`** (1 nodes): `stores.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 87`** (1 nodes): `stores.js`
+- **Thin community `Community 87`** (1 nodes): `ConfigEditor.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 88`** (1 nodes): `ConfigEditor.svelte`
+- **Thin community `Community 88`** (1 nodes): `LiveLogs.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 89`** (1 nodes): `LiveLogs.svelte`
+- **Thin community `Community 89`** (1 nodes): `PairingFlow.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 90`** (1 nodes): `Badge.svelte`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
@@ -746,12 +746,12 @@ Nodes (1): Return formatted memory text for inclusion in LLM system prompts.
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `FileManager` connect `Community 1` to `Community 10`, `Community 3`?**
-  _High betweenness centrality (0.093) - this node is a cross-community bridge._
-- **Why does `get_repository()` connect `Community 5` to `Community 1`, `Community 2`, `Community 3`, `Community 4`, `Community 7`, `Community 8`, `Community 9`, `Community 10`, `Community 13`?**
+- **Why does `get_repository()` connect `Community 5` to `Community 0`, `Community 2`, `Community 3`, `Community 4`, `Community 6`, `Community 7`, `Community 9`, `Community 12`?**
+  _High betweenness centrality (0.083) - this node is a cross-community bridge._
+- **Why does `FileManager` connect `Community 0` to `Community 9`, `Community 4`, `Community 5`?**
   _High betweenness centrality (0.076) - this node is a cross-community bridge._
-- **Why does `Repository` connect `Community 6` to `Community 2`, `Community 3`?**
-  _High betweenness centrality (0.068) - this node is a cross-community bridge._
+- **Why does `Repository` connect `Community 8` to `Community 2`, `Community 4`, `Community 6`?**
+  _High betweenness centrality (0.067) - this node is a cross-community bridge._
 - **Are the 90 inferred relationships involving `FileManager` (e.g. with `BuildHandoffService` and `Service for generating Prometheus build handoff prompts and tracking build progr`) actually correct?**
   _`FileManager` has 90 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 73 inferred relationships involving `get_repository()` (e.g. with `websocket_chat()` and `get_chat_history()`) actually correct?**

@@ -7,7 +7,9 @@
   const API_GATEWAY = 'https://api.karkhana.one';
 
   async function gwApi(path, opts = {}) {
-    const res = await fetch(`${API_GATEWAY}${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts });
+    const isBodyMethod = opts.method === 'POST' || opts.method === 'PUT' || opts.method === 'PATCH';
+    const headers = isBodyMethod ? { 'Content-Type': 'application/json' } : {};
+    const res = await fetch(`${API_GATEWAY}${path}`, { headers, ...opts });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   }

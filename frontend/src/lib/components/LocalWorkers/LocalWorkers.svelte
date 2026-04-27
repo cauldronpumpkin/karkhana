@@ -138,8 +138,8 @@
         <div class="link-output">
           <code>{inviteLink}</code>
           <Button size="sm" variant="secondary" onclick={copyInviteLink}>
-            {copied ? <CheckCircle2 size={14} /> : <Clipboard size={14} />}
-            {copied ? 'Copied' : 'Copy'}
+            {#if copied}<CheckCircle2 size={14} />{:else}<Clipboard size={14} />{/if}
+              {copied ? 'Copied' : 'Copy'}
           </Button>
         </div>
         <p class="hint">Paste this link into the worker app's Invite Link field to connect.</p>

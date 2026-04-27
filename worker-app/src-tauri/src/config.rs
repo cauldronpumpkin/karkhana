@@ -23,7 +23,7 @@ pub fn load_config() -> WorkerConfig {
         data["api_base"] = serde_json::Value::String(env_api_base);
     }
     if data.get("api_base").is_none() {
-        data["api_base"] = serde_json::Value::String("http://localhost:8000".to_string());
+        data["api_base"] = serde_json::Value::String("https://api.karkhana.one".to_string());
     }
 
     if let Ok(env_engine) = env::var("IDEAREFINERY_WORKER_ENGINE") {
@@ -39,7 +39,7 @@ pub fn load_config() -> WorkerConfig {
     }
 
     serde_json::from_value(data).unwrap_or_else(|_| WorkerConfig {
-        api_base: "http://localhost:8000".to_string(),
+        api_base: "https://api.karkhana.one".to_string(),
         ..Default::default()
     })
 }
@@ -66,7 +66,7 @@ pub fn save_config_command(config: WorkerConfig) -> Result<(), String> {
 impl Default for WorkerConfig {
     fn default() -> Self {
         WorkerConfig {
-            api_base: "http://localhost:8000".to_string(),
+            api_base: "https://api.karkhana.one".to_string(),
             display_name: "OpenClaude local worker".to_string(),
             engine: "opencode-server".to_string(),
             allow_full_control: false,

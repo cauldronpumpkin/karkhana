@@ -2,7 +2,7 @@ import json
 import urllib.request
 import time
 
-API_BASE = "https://s3juzhfqp5.execute-api.us-east-1.amazonaws.com"
+API_BASE = "https://api.karkhana.one"
 WORKER_TOKEN = "dev-worker-secret-12345"
 WORKER_ID = "dev-workstation-01"
 OPENCODE_URL = "http://127.0.0.1:4096"

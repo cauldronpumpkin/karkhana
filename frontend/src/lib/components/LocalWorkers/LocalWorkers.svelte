@@ -4,7 +4,7 @@
   import Button from '../UI/Button.svelte';
   import Badge from '../UI/Badge.svelte';
 
-  const API_GATEWAY = 'https://s3juzhfqp5.execute-api.us-east-1.amazonaws.com';
+  const API_GATEWAY = 'https://api.karkhana.one';
 
   async function gwApi(path, opts = {}) {
     const res = await fetch(`${API_GATEWAY}${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts });

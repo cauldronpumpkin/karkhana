@@ -1,11 +1,11 @@
 # Graph Report - .  (2026-04-27)
 
 ## Corpus Check
-- 168 files · ~116,057 words
+- 168 files · ~116,023 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1275 nodes · 2947 edges · 110 communities detected
+- 1285 nodes · 2961 edges · 110 communities detected
 - Extraction: 59% EXTRACTED · 41% INFERRED · 0% AMBIGUOUS · INFERRED: 1222 edges (avg confidence: 0.7)
 - Token cost: 0 input · 0 output
 
@@ -136,104 +136,104 @@
 ## Surprising Connections (you probably didn't know these)
 - `ProjectMemory` --uses--> `Service for managing project memory entries.`  [INFERRED]
   backend\app\repository.py → backend\app\services\memory.py
-- `handler()` --calls--> `run()`  [INFERRED]
-  backend\app\lambda_handler.py → worker-app\src-tauri\src\lib.rs
-- `utcnow()` --calls--> `test_revoked_and_expired_workers_cannot_submit_events()`  [INFERRED]
-  backend\app\repository.py → backend\tests\test_local_workers_api.py
-- `Idea` --uses--> `ProjectTwinService`  [INFERRED]
-  backend\app\repository.py → backend\app\services\project_twin.py
-- `Idea` --uses--> `RelationshipService`  [INFERRED]
-  backend\app\repository.py → backend\app\services\relationships.py
+- `AI scores idea on all 7 dimensions.` --uses--> `ScoringService`  [INFERRED]
+  backend\app\routers\scoring.py → backend\app\services\scoring.py
+- `Get all scores for an idea.` --uses--> `ScoringService`  [INFERRED]
+  backend\app\routers\scoring.py → backend\app\services\scoring.py
+- `Get composite (weighted average) score.` --uses--> `ScoringService`  [INFERRED]
+  backend\app\routers\scoring.py → backend\app\services\scoring.py
+- `Manual override for a single dimension score.` --uses--> `ScoringService`  [INFERRED]
+  backend\app\routers\scoring.py → backend\app\services\scoring.py
 
 ## Communities
 
 ### Community 0 - "Community 0"
-Cohesion: 0.02
-Nodes (142): list_ai_models(), get_build_prompts(), get_current_step(), get_service(), BuildHandoffService, Generate a comprehensive Prometheus planning prompt for the entire project., Generate a comprehensive Prometheus planning prompt for the entire project., Generate step-by-step build prompts for Prometheus. (+134 more)
+Cohesion: 0.03
+Nodes (124): list_ai_models(), get_build_prompts(), get_current_step(), get_service(), BuildHandoffService, Generate a comprehensive Prometheus planning prompt for the entire project., Generate a comprehensive Prometheus planning prompt for the entire project., Generate step-by-step build prompts for Prometheus. (+116 more)
 
 ### Community 1 - "Community 1"
-Cohesion: 0.02
-Nodes (82): EngineMode, resolve_engine_mode(), run_agent(), run_cli_agent(), run_command(), run_server_agent(), run_server_agent_session(), ServerAgentResult (+74 more)
+Cohesion: 0.03
+Nodes (77): EngineMode, resolve_engine_mode(), run_agent(), run_cli_agent(), run_command(), run_server_agent(), run_server_agent_session(), ServerAgentResult (+69 more)
 
 ### Community 2 - "Community 2"
-Cohesion: 0.05
-Nodes (39): handler(), approve_request(), deny_request(), DenyRequest, get_registration(), get_service(), hash_token(), list_requests() (+31 more)
+Cohesion: 0.04
+Nodes (7): _clean_for_dynamo(), _clean_from_dynamo(), _dt(), DynamoDBRepository, InMemoryRepository, _iso(), utcnow()
 
 ### Community 3 - "Community 3"
-Cohesion: 0.04
-Nodes (52): process_logo(), SqsMessage, SqsTransport, Tests for the Chat API (REST endpoints; WebSocket tested via REST history)., Happy path: GET chat history for idea with no messages returns empty list., Edge case: GET chat history for nonexistent idea returns 404., Happy path: POST chat message returns assistant response., Edge case: POST chat message for nonexistent idea returns 404. (+44 more)
+Cohesion: 0.05
+Nodes (68): _build_context(), get_chat_history(), send_chat_message(), websocket_chat(), db_session(), FakeSession, mock_llm(), MockLLMService (+60 more)
 
 ### Community 4 - "Community 4"
-Cohesion: 0.07
-Nodes (49): db_session(), FakeSession, mock_llm(), MockLLMService, Test fixtures for Idea Refinery backend tests., Mock LLM service that returns canned responses., sample_idea(), sample_idea_two() (+41 more)
+Cohesion: 0.03
+Nodes (52): process_logo(), SqsMessage, SqsTransport, Tests for the Chat API (REST endpoints; WebSocket tested via REST history)., Happy path: GET chat history for idea with no messages returns empty list., Edge case: GET chat history for nonexistent idea returns 404., Happy path: POST chat message returns assistant response., Edge case: POST chat message for nonexistent idea returns 404. (+44 more)
 
 ### Community 5 - "Community 5"
-Cohesion: 0.07
-Nodes (49): _build_context(), get_chat_history(), send_chat_message(), websocket_chat(), create_idea(), delete_idea(), _get_composite_score(), get_idea() (+41 more)
+Cohesion: 0.06
+Nodes (46): handler(), approve_request(), deny_request(), DenyRequest, get_registration(), get_service(), hash_token(), list_requests() (+38 more)
 
 ### Community 6 - "Community 6"
 Cohesion: 0.04
-Nodes (1): InMemoryRepository
+Nodes (1): Repository
 
 ### Community 7 - "Community 7"
-Cohesion: 0.08
-Nodes (42): create_relationship(), CreateRelationshipRequest, derive_idea(), DeriveRequest, get_relationships(), get_service(), _idea_dict(), merge_ideas() (+34 more)
+Cohesion: 0.1
+Nodes (39): create_or_update_memory(), delete_memory(), get_all_global_memory(), get_idea_memory(), get_service(), _memory_to_dict(), MemoryCreate, MemoryResponse (+31 more)
 
 ### Community 8 - "Community 8"
-Cohesion: 0.04
-Nodes (1): Repository
+Cohesion: 0.08
+Nodes (39): create_relationship(), CreateRelationshipRequest, derive_idea(), DeriveRequest, get_relationships(), get_service(), merge_ideas(), MergeRequest (+31 more)
 
 ### Community 9 - "Community 9"
 Cohesion: 0.11
-Nodes (37): BaseModel, ChatMessageRequest, _extract_topic(), generate_research_prompts(), GenerateResponse, get_service(), integrate_research(), IntegrateResponse (+29 more)
+Nodes (35): BaseModel, _extract_topic(), generate_research_prompts(), GenerateResponse, get_service(), integrate_research(), IntegrateResponse, list_research_tasks() (+27 more)
 
 ### Community 10 - "Community 10"
-Cohesion: 0.07
-Nodes (23): BranchWorkResult, ClaimRequest, ClaimResponse, FileEntry, Job, JobClaim, JobCompleteRequest, JobFailRequest (+15 more)
+Cohesion: 0.09
+Nodes (29): check_updates(), run(), main(), CopyTo(), create_shortcut(), fixup_dbi(), get_root_hkey(), get_shortcuts_folder() (+21 more)
 
 ### Community 11 - "Community 11"
-Cohesion: 0.14
-Nodes (23): CopyTo(), create_shortcut(), fixup_dbi(), get_root_hkey(), get_shortcuts_folder(), get_special_folder_path(), get_system_dir(), install() (+15 more)
+Cohesion: 0.07
+Nodes (23): BranchWorkResult, ClaimRequest, ClaimResponse, FileEntry, Job, JobClaim, JobCompleteRequest, JobFailRequest (+15 more)
 
 ### Community 12 - "Community 12"
 Cohesion: 0.14
 Nodes (7): GitHubAppService, GitHub App helper for installation metadata and short-lived tokens., get_service(), github_app_webhook(), list_installation_repos(), GitHubInstallation, WorkerSqsPublisher
 
 ### Community 13 - "Community 13"
-Cohesion: 0.13
-Nodes (10): main(), _RateLimiter, Synchronous DuckDuckGo search call., Return cached results if still valid., Store results in cache., Simple in-memory sliding window rate limiter., Web search service using DuckDuckGo with rate limiting and caching., Search the web and return list of {title, url, snippet}.          Returns empty (+2 more)
-
-### Community 14 - "Community 14"
 Cohesion: 0.14
 Nodes (14): Base, Compatibility placeholder; production persistence is DynamoDB-backed., _mock_chat_completion(), _mock_chat_completion_sync(), _mock_llm_init(), Test server entry point with mocked LLM service.  This module patches all LLM ca, Drop and recreate database tables for clean test state., Replace LLMService init to avoid real API connections. (+6 more)
 
+### Community 14 - "Community 14"
+Cohesion: 0.15
+Nodes (9): _RateLimiter, Synchronous DuckDuckGo search call., Return cached results if still valid., Store results in cache., Simple in-memory sliding window rate limiter., Web search service using DuckDuckGo with rate limiting and caching., Search the web and return list of {title, url, snippet}.          Returns empty, Fetch a URL and extract readable text.          Returns empty string on failure (+1 more)
+
 ### Community 15 - "Community 15"
-Cohesion: 0.28
-Nodes (12): claim_job(), ClaimRequest, complete_job(), fail_job(), get_invite_link(), get_service(), heartbeat_job(), JobCompleteRequest (+4 more)
+Cohesion: 0.2
+Nodes (13): compare_ideas(), CompareRequest, get_composite_score(), get_scores(), get_service(), AI scores idea on all 7 dimensions., Get all scores for an idea., Get composite (weighted average) score. (+5 more)
 
 ### Community 16 - "Community 16"
 Cohesion: 0.15
 Nodes (11): CreateSessionRequest, FileDiff, HealthResponse, MessagePart, MessageResponse, ModelRef, OpenCodeError, PermissionResponse (+3 more)
 
 ### Community 17 - "Community 17"
+Cohesion: 0.23
+Nodes (5): act(), approve(), deny(), revoke(), rotate()
+
+### Community 18 - "Community 18"
 Cohesion: 0.26
 Nodes (7): api(), apiDelete(), apiPost(), apiPut(), buildUrl(), loadProject(), reindex()
 
-### Community 18 - "Community 18"
+### Community 19 - "Community 19"
 Cohesion: 0.2
 Nodes (0): 
 
-### Community 19 - "Community 19"
+### Community 20 - "Community 20"
 Cohesion: 0.22
 Nodes (0): 
 
-### Community 20 - "Community 20"
+### Community 21 - "Community 21"
 Cohesion: 0.48
 Nodes (6): approve_advancement(), get_current_phase(), get_engine(), reject_advancement(), RejectRequest, suggest_advancement()
-
-### Community 21 - "Community 21"
-Cohesion: 0.4
-Nodes (0): 
 
 ### Community 22 - "Community 22"
 Cohesion: 0.4
@@ -244,7 +244,7 @@ Cohesion: 0.4
 Nodes (0): 
 
 ### Community 24 - "Community 24"
-Cohesion: 0.5
+Cohesion: 0.4
 Nodes (0): 
 
 ### Community 25 - "Community 25"
@@ -253,23 +253,23 @@ Nodes (0):
 
 ### Community 26 - "Community 26"
 Cohesion: 0.5
-Nodes (1): active
+Nodes (0): 
 
 ### Community 27 - "Community 27"
-Cohesion: 0.67
-Nodes (2): BaseSettings, Settings
+Cohesion: 0.5
+Nodes (1): active
 
 ### Community 28 - "Community 28"
 Cohesion: 0.67
-Nodes (0): 
+Nodes (2): BaseSettings, Settings
 
 ### Community 29 - "Community 29"
 Cohesion: 0.67
-Nodes (1): MockWebSocket
+Nodes (0): 
 
 ### Community 30 - "Community 30"
 Cohesion: 0.67
-Nodes (0): 
+Nodes (1): MockWebSocket
 
 ### Community 31 - "Community 31"
 Cohesion: 0.67
@@ -284,7 +284,7 @@ Cohesion: 0.67
 Nodes (0): 
 
 ### Community 34 - "Community 34"
-Cohesion: 1.0
+Cohesion: 0.67
 Nodes (0): 
 
 ### Community 35 - "Community 35"
@@ -590,17 +590,15 @@ Nodes (1): Return formatted memory text for inclusion in LLM system prompts.
 ## Knowledge Gaps
 - **93 isolated node(s):** `Compatibility placeholder; production persistence is DynamoDB-backed.`, `Simple in-memory sliding window rate limiter.`, `Web search service using DuckDuckGo with rate limiting and caching.`, `Search the web and return list of {title, url, snippet}.          Returns empty`, `Fetch a URL and extract readable text.          Returns empty string on failure` (+88 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **Thin community `Community 34`** (2 nodes): `test_enqueue.py`, `req()`
+- **Thin community `Community 35`** (2 nodes): `test_enqueue.py`, `req()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 35`** (2 nodes): `test_pipeline.py`, `req()`
+- **Thin community `Community 36`** (2 nodes): `test_pipeline.py`, `req()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 36`** (2 nodes): `init_db.py`, `main()`
+- **Thin community `Community 37`** (2 nodes): `init_db.py`, `main()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 37`** (2 nodes): `App.svelte`, `main.js`
+- **Thin community `Community 38`** (2 nodes): `App.svelte`, `main.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 38`** (2 nodes): `Actions.svelte`, `Actions.test.js`
-  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 39`** (2 nodes): `LocalWorkers.svelte`, `LocalWorkers.test.js`
+- **Thin community `Community 39`** (2 nodes): `Actions.svelte`, `Actions.test.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 40`** (2 nodes): `Reports.svelte`, `Reports.test.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
@@ -746,12 +744,12 @@ Nodes (1): Return formatted memory text for inclusion in LLM system prompts.
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `get_repository()` connect `Community 5` to `Community 0`, `Community 2`, `Community 3`, `Community 4`, `Community 6`, `Community 7`, `Community 9`, `Community 12`?**
-  _High betweenness centrality (0.083) - this node is a cross-community bridge._
-- **Why does `FileManager` connect `Community 0` to `Community 9`, `Community 4`, `Community 5`?**
+- **Why does `get_repository()` connect `Community 5` to `Community 0`, `Community 2`, `Community 3`, `Community 4`, `Community 7`, `Community 8`, `Community 9`, `Community 12`?**
+  _High betweenness centrality (0.082) - this node is a cross-community bridge._
+- **Why does `InMemoryRepository` connect `Community 2` to `Community 3`, `Community 5`, `Community 6`?**
   _High betweenness centrality (0.076) - this node is a cross-community bridge._
-- **Why does `Repository` connect `Community 8` to `Community 2`, `Community 4`, `Community 6`?**
-  _High betweenness centrality (0.067) - this node is a cross-community bridge._
+- **Why does `FileManager` connect `Community 0` to `Community 9`, `Community 3`?**
+  _High betweenness centrality (0.070) - this node is a cross-community bridge._
 - **Are the 90 inferred relationships involving `FileManager` (e.g. with `BuildHandoffService` and `Service for generating Prometheus build handoff prompts and tracking build progr`) actually correct?**
   _`FileManager` has 90 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 73 inferred relationships involving `get_repository()` (e.g. with `websocket_chat()` and `get_chat_history()`) actually correct?**

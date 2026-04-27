@@ -33,11 +33,6 @@ async def verify_worker(worker_id: str, x_idearefinery_worker_token: str | None,
         raise HTTPException(status_code=401, detail="Invalid worker token")
 
 
-class InviteLinkRequest(BaseModel):
-    worker_id: str | None = Field(default=None, min_length=1)
-    api_base: str | None = Field(default=None)
-
-
 class ClaimRequest(BaseModel):
     worker_id: str = Field(..., min_length=1)
     capabilities: list[str] | None = None

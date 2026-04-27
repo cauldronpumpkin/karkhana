@@ -28,7 +28,12 @@ frontend_static = StaticFiles(directory=STATIC_DIR, check_dir=False)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:8000"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:8000",
+        "https://www.karkhana.one",
+        "https://api.karkhana.one",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

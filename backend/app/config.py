@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     worker_client_role_arn: str = Field(default="", alias="IDEAREFINERY_WORKER_CLIENT_ROLE_ARN")
     worker_credential_ttl_seconds: int = Field(default=3600, alias="IDEAREFINERY_WORKER_CREDENTIAL_TTL_SECONDS")
     worker_sqs_region: str = Field(default="us-east-1", alias="IDEAREFINERY_WORKER_SQS_REGION")
+    cors_origins: str = Field(
+        default="http://localhost:5173,http://localhost:8000,https://www.karkhana.one,https://api.karkhana.one",
+        alias="IDEAREFINERY_CORS_ORIGINS",
+    )
+    cors_origin_regex: str = Field(
+        default=r"https://.*\.amplifyapp\.com",
+        alias="IDEAREFINERY_CORS_ORIGIN_REGEX",
+    )
     max_repair_attempts_per_task: int = Field(default=3, alias="IDEAREFINERY_MAX_REPAIR_ATTEMPTS_PER_TASK")
     max_repair_attempts_per_batch: int = Field(default=5, alias="IDEAREFINERY_MAX_REPAIR_ATTEMPTS_PER_BATCH")
     claude_settings_path: str = Field(

@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.app.config import settings
 from backend.app.routers.chat import router as chat_router
 from backend.app.routers.ai import router as ai_router
 from backend.app.routers.phases import router as phases_router
@@ -30,12 +31,8 @@ frontend_static = StaticFiles(directory=STATIC_DIR, check_dir=False)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:8000",
-        "https://www.karkhana.one",
-        "https://api.karkhana.one",
-    ],
+    allow_origins=[origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()],
+    allow_origin_regex=settings.cors_origin_regex or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

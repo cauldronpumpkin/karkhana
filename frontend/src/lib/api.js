@@ -2,7 +2,8 @@ export const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 function buildUrl(path) {
   if (/^https?:\/\//.test(path)) return path;
-  return `${API_BASE}${path}`;
+  if (!API_BASE) return path;
+  return `${API_BASE.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
 }
 
 export function buildWebSocketUrl(path) {
@@ -35,8 +36,10 @@ export async function api(path, options = {}) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     
-    const data = await response.json();
-    return data;
+    if (response.status === 204) return null;
+
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
   } catch (error) {
     console.error('API request failed:', error);
     throw error;

@@ -3,8 +3,10 @@
   import { CheckCircle2, Clipboard, KeyRound, Link2, Loader2, RefreshCw, RotateCw, ServerCog, ShieldOff, TerminalSquare, XCircle } from 'lucide-svelte';
   import Button from '../UI/Button.svelte';
   import Badge from '../UI/Badge.svelte';
+  import { API_BASE } from '../../api.js';
 
-  const API_GATEWAY = 'https://api.karkhana.one';
+  const API_GATEWAY = API_BASE?.replace(/\/$/, '') || '';
+  const WORKER_API_BASE = (import.meta.env.VITE_WORKER_API_BASE_URL || API_GATEWAY || window.location.origin).replace(/\/$/, '');
 
   async function gwApi(path, opts = {}) {
     const isBodyMethod = opts.method === 'POST' || opts.method === 'PUT' || opts.method === 'PATCH';
@@ -40,7 +42,7 @@
   async function generateInviteLink() {
     isActing = 'invite'; error = '';
     try {
-      const res = await fetch(`${API_GATEWAY}/api/worker/invite-link?api_base=${encodeURIComponent(API_GATEWAY)}${workerIdInput ? `&worker_id=${encodeURIComponent(workerIdInput)}` : ''}`);
+      const res = await fetch(`${API_GATEWAY}/api/worker/invite-link?api_base=${encodeURIComponent(WORKER_API_BASE)}${workerIdInput ? `&worker_id=${encodeURIComponent(workerIdInput)}` : ''}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       inviteLink = data.invite_link;
@@ -245,9 +247,9 @@
   .link-output { align-items: center; display: flex; gap: var(--spacing-sm); }
   .link-output code { background: rgba(0, 0, 0, 0.28); border: 1px solid rgba(103, 128, 151, 0.2); border-radius: var(--border-radius-md); color: var(--color-success); flex: 1; font-family: var(--font-mono); font-size: 0.74rem; overflow-x: auto; padding: var(--spacing-sm); white-space: pre-wrap; }
   .hint { color: var(--color-text-secondary); font-size: 0.78rem; margin: 0; }
-  .row-list, .event-list { display: grid; gap: 10px; }
-  .request-row, .worker-row, .event-list article, .empty { background: rgba(3, 8, 12, 0.48); border: 1px solid rgba(103, 128, 151, 0.18); border-radius: var(--border-radius-md); padding: var(--spacing-md); }
-  .request-row strong, .request-row small, .request-row span, .worker-row strong, .worker-row small, .worker-row span, .event-list strong, .event-list small { display: block; }
+  .row-list { display: grid; gap: 10px; }
+  .request-row, .worker-row, .empty { background: rgba(3, 8, 12, 0.48); border: 1px solid rgba(103, 128, 151, 0.18); border-radius: var(--border-radius-md); padding: var(--spacing-md); }
+  .request-row strong, .request-row small, .request-row span, .worker-row strong, .worker-row small, .worker-row span { display: block; }
   .empty { color: var(--color-text-secondary); min-height: 64px; }
   .notice.error { border-color: rgba(255, 61, 79, 0.42); color: var(--color-error); margin-bottom: var(--spacing-lg); }
   .spin { animation: spin 1s linear infinite; }

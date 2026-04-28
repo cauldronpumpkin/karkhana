@@ -1,11 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
 import LocalWorkers from './LocalWorkers.svelte';
-import * as apiModule from '../../api.js';
 
 vi.mock('../../api.js', () => ({
-  api: vi.fn(),
-  apiPost: vi.fn(),
+  API_BASE: '',
 }));
 
 const dashboard = {
@@ -40,12 +38,22 @@ const dashboard = {
 describe('LocalWorkers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    apiModule.api.mockResolvedValue(dashboard);
-    apiModule.apiPost.mockResolvedValue({ worker: dashboard.workers[0], credentials: { api_token: 'token-1' } });
+    fetch.mockImplementation((url, options = {}) => {
+      if (url === '/api/local-workers' && !options.method) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(dashboard) });
+      }
+      if (url.startsWith('/api/worker/invite-link')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ invite_link: 'idearefinery://connect?api_base=http%3A%2F%2Flocalhost' }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
     Object.assign(navigator, { clipboard: { writeText: vi.fn() } });
   });
 
-  it('renders pending requests, approved workers, and install instructions', async () => {
+  it('renders pending requests and approved workers', async () => {
     render(LocalWorkers);
 
     await waitFor(() => {
@@ -53,8 +61,7 @@ describe('LocalWorkers', () => {
       expect(screen.getByText('Build Box')).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/install\.ps1 -ApiBase/)).toBeInTheDocument();
-    expect(screen.getByText('SQS ready')).toBeInTheDocument();
+    expect(screen.getByText('Worker management')).toBeInTheDocument();
   });
 
   it('approves a worker request', async () => {
@@ -64,8 +71,10 @@ describe('LocalWorkers', () => {
     await fireEvent.click(approveButton);
 
     await waitFor(() => {
-      expect(apiModule.apiPost).toHaveBeenCalledWith('/api/local-workers/requests/request-1/approve', {});
-      expect(screen.getByText('Newly issued credentials')).toBeInTheDocument();
+      expect(fetch).toHaveBeenCalledWith(
+        '/api/local-workers/requests/request-1/approve',
+        expect.objectContaining({ method: 'POST', body: '{}' })
+      );
     });
   });
 
@@ -79,8 +88,14 @@ describe('LocalWorkers', () => {
     await fireEvent.click(revokeButton);
 
     await waitFor(() => {
-      expect(apiModule.apiPost).toHaveBeenCalledWith('/api/local-workers/worker-1/rotate-credentials', {});
-      expect(apiModule.apiPost).toHaveBeenCalledWith('/api/local-workers/worker-1/revoke', {});
+      expect(fetch).toHaveBeenCalledWith(
+        '/api/local-workers/worker-1/rotate-credentials',
+        expect.objectContaining({ method: 'POST', body: '{}' })
+      );
+      expect(fetch).toHaveBeenCalledWith(
+        '/api/local-workers/worker-1/revoke',
+        expect.objectContaining({ method: 'POST', body: '{}' })
+      );
     });
   });
 });

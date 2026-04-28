@@ -11,7 +11,8 @@ use crate::sandbox::PermissionPolicy;
 use crate::sqs::SqsTransport;
 use crate::state::StateStore;
 use crate::types::{
-    Job, JobCompleteRequest, JobFailRequest, JobUpdateRequest, Project, WorkerConfig, WorkerState,
+    HIGH_AUTONOMY_REQUIRED_CAPABILITIES, Job, JobCompleteRequest, JobFailRequest, JobUpdateRequest,
+    Project, WorkerConfig, WorkerState,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -19,6 +20,29 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::time::{sleep, Duration};
+
+#[allow(dead_code)]
+fn is_high_autonomy_job(payload: &serde_json::Value) -> bool {
+    let autonomy = payload
+        .get("autonomy_level")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    autonomy == "autonomous_development" || autonomy == "full_autopilot"
+}
+
+#[allow(dead_code)]
+fn has_graphify_verification(payload: &serde_json::Value) -> bool {
+    let cmds = payload
+        .get("verification_commands")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .any(|c| c.contains("graphify update"))
+        })
+        .unwrap_or(false);
+    cmds
+}
 
 static WORKER_RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -86,6 +110,10 @@ async fn run_worker_loop(app: &AppHandle) -> Result<(), WorkerError> {
     } else {
         None
     };
+
+    let _is_high_autonomy = HIGH_AUTONOMY_REQUIRED_CAPABILITIES.iter().all(|cap| {
+        ctx.config.capabilities.iter().any(|c| c == cap)
+    });
 
     if ctx.config.engine == "opencode-server" || ctx.config.opencode_server_url.is_some() {
         let base_url = ctx
@@ -576,6 +604,16 @@ async fn branch_work_with_server(
 
     let tests_passed = run_tests(repo_dir, &test_commands, logs).await;
 
+    let has_graphify_cmd = test_commands.iter().any(|c| c.contains("graphify update"));
+    let mut graphify_updated = false;
+    if has_graphify_cmd {
+        graphify_updated = run_graphify_update(repo_dir, logs).await;
+        if !graphify_updated {
+            logs.push("[WARNING] graphify update . failed or was not found. "
+                .to_string() + "The knowledge graph may be out of date.");
+        }
+    }
+
     let status = crate::git::git_status_porcelain(repo_dir, logs)
         .await
         .unwrap_or_default();
@@ -615,6 +653,7 @@ async fn branch_work_with_server(
         agent_output: cb_result.output,
         tests_passed,
         full_control_used: full_control,
+        graphify_updated,
     })
 }
 
@@ -655,6 +694,30 @@ async fn run_tests(repo_dir: &PathBuf, commands: &[String], logs: &mut Vec<Strin
         ok = ok && output.status.success();
     }
     ok
+}
+
+pub(crate) async fn run_graphify_update(repo_dir: &std::path::Path, logs: &mut Vec<String>) -> bool {
+    let mut cmd = tokio::process::Command::new("graphify");
+    cmd.current_dir(repo_dir);
+    cmd.arg("update");
+    cmd.arg(".");
+    logs.push("$ graphify update .".to_string());
+    match cmd.output().await {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let combined = format!("{}{}", stdout, stderr);
+            if !combined.trim().is_empty() {
+                logs.push(combined.trim().to_string());
+            }
+            logs.push(format!("exit code: {}", output.status.code().unwrap_or(-1)));
+            output.status.success()
+        }
+        Err(e) => {
+            logs.push(format!("Failed to run graphify: {}", e));
+            false
+        }
+    }
 }
 
 fn slug(value: &str) -> String {

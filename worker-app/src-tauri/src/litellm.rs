@@ -223,6 +223,21 @@ impl LiteLLMProxy {
         self.stop().await.ok();
         self.start(config_path).await
     }
+
+    pub async fn check_routing_reachable(&self) -> Result<bool, LiteLLMError> {
+        let url = format!("http://{}:{}/model/info", DEFAULT_LITELLM_HOST, self.port);
+        let result = self
+            .client
+            .get(&url)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await;
+        match result {
+            Ok(resp) if resp.status().is_success() => Ok(true),
+            Ok(resp) => Ok(resp.status().as_u16() != 503),
+            Err(_) => Ok(false),
+        }
+    }
 }
 
 impl Drop for LiteLLMProxy {

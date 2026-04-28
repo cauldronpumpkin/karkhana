@@ -19,6 +19,7 @@ from backend.app.repository import (
     get_repository,
     utcnow,
 )
+from backend.app.services.factory_tracking import collect_factory_run_bundle, refresh_factory_run_tracking_manifest
 from backend.app.services.worker_sqs import WorkerSqsPublisher
 
 CLAIMABLE_STATUSES = {"queued", "waiting_for_machine", "failed_retryable"}
@@ -114,6 +115,16 @@ class ProjectTwinService:
         jobs = await repo.list_work_items(idea_id)
         runs = await repo.list_agent_runs(idea_id)
         commits = await repo.list_project_commits(idea_id)
+        factory_runs = []
+        for run in (await repo.list_factory_runs(idea_id=idea_id))[:5]:
+            bundle = await collect_factory_run_bundle(repo, run.id)
+            if bundle:
+                factory_runs.append({
+                    "factory_run": to_jsonable(bundle["factory_run"]),
+                    "tracking_manifest": to_jsonable(bundle["tracking_manifest"]),
+                    "tracking_summary": bundle["tracking_summary"],
+                    "phases": [to_jsonable(phase) for phase in bundle["phases"]],
+                })
         return {
             "idea": to_jsonable(idea),
             "project": to_jsonable(project),
@@ -121,6 +132,7 @@ class ProjectTwinService:
             "jobs": [to_jsonable(job) for job in jobs],
             "agent_runs": [to_jsonable(run) for run in runs[:10]],
             "commits": [to_jsonable(commit) for commit in commits[:10]],
+            "factory_runs": factory_runs,
         }
 
     async def enqueue_reindex(self, idea_id: str) -> WorkItem:
@@ -183,12 +195,28 @@ class ProjectTwinService:
                 item.error = "Project twin not found"
                 await repo.save_work_item(item)
                 continue
+            if capabilities:
+                autonomy_level = (item.payload or {}).get("autonomy_level", "")
+                from backend.app.services.autonomy import validate_worker_capabilities_for_autonomy
+                missing = validate_worker_capabilities_for_autonomy(
+                    capabilities, autonomy_level, worker_name=worker_id
+                )
+                if missing:
+                    item.status = "failed_terminal"
+                    item.error = (
+                        f"Worker '{worker_id}' missing required capabilities for "
+                        f"autonomy level '{autonomy_level}': {', '.join(missing)}. "
+                        f"High-autonomy Factory Runs require opencode-server engine."
+                    )
+                    await repo.save_work_item(item)
+                    continue
             item.status = "claimed"
             item.worker_id = worker_id
             item.claim_token = str(uuid.uuid4())
             item.claimed_at = utcnow()
             item.heartbeat_at = item.claimed_at
             await repo.save_work_item(item)
+            await self._refresh_factory_tracking(item)
             return {"job": to_jsonable(item), "project": to_jsonable(project)}
         return None
 
@@ -199,12 +227,26 @@ class ProjectTwinService:
         if logs:
             item.logs = self._append_log(item.logs, logs)
         await get_repository().save_work_item(item)
+        await self._refresh_factory_tracking(item)
         return to_jsonable(item)
 
     async def complete_job(self, job_id: str, claim_token: str, worker_id: str, result: dict[str, Any] | None = None, logs: str = "") -> dict[str, Any]:
         repo = get_repository()
         item = await self._locked_job(job_id, claim_token, worker_id)
         result = result or {}
+        payload = item.payload or {}
+        factory_run_id = payload.get("factory_run_id")
+        if factory_run_id and item.job_type != "repo_index":
+            graphify_updated = result.get("graphify_updated", False)
+            verification_commands = payload.get("verification_commands") or []
+            has_graphify_cmd = any("graphify update" in cmd for cmd in verification_commands)
+            if has_graphify_cmd and not graphify_updated:
+                logs_combined = f"{logs}\n" if logs else ""
+                logs_combined += (
+                    "[WARNING] graphify update . must be run before completion to keep the "
+                    "knowledge graph current. Set graphify_updated=true in the result."
+                )
+                item.logs = self._append_log(item.logs, logs_combined)
         item.status = "completed"
         item.result = result
         item.heartbeat_at = utcnow()
@@ -220,6 +262,7 @@ class ProjectTwinService:
             if item.job_type == "repo_index":
                 await self._store_code_index(project, item, result)
             await repo.save_project_twin(project)
+        await self._refresh_factory_tracking(item)
 
         if result.get("commit_sha") and result.get("branch_name"):
             await repo.add_project_commit(
@@ -247,6 +290,7 @@ class ProjectTwinService:
         else:
             item.status = "failed_terminal"
         await get_repository().save_work_item(item)
+        await self._refresh_factory_tracking(item)
         return to_jsonable(item)
 
     async def requeue_expired_claims(self) -> None:
@@ -260,6 +304,7 @@ class ProjectTwinService:
                 item.claim_token = None
                 item.error = "Worker heartbeat expired"
                 await repo.save_work_item(item)
+                await self._refresh_factory_tracking(item)
 
     async def _locked_job(self, job_id: str, claim_token: str, worker_id: str) -> WorkItem:
         item = await get_repository().get_work_item(job_id)
@@ -310,3 +355,10 @@ class ProjectTwinService:
     def _append_log(self, current: str, new: str) -> str:
         text = f"{current.rstrip()}\n{new.strip()}".strip()
         return text[-20000:]
+
+    async def _refresh_factory_tracking(self, item: WorkItem) -> None:
+        payload = item.payload or {}
+        factory_run_id = payload.get("factory_run_id")
+        if not factory_run_id:
+            return
+        await refresh_factory_run_tracking_manifest(get_repository(), factory_run_id)

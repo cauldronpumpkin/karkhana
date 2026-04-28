@@ -6,6 +6,7 @@
   import Reports from './lib/components/Reports/Reports.svelte';
   import Actions from './lib/components/Actions/Actions.svelte';
   import ProjectTwinView from './lib/components/ProjectTwin/ProjectTwinView.svelte';
+  import KarkhanaRunPanel from './lib/components/Karkhana/KarkhanaRunPanel.svelte';
   import LocalWorkers from './lib/components/LocalWorkers/LocalWorkers.svelte';
   import CreateIdea from './lib/components/Dashboard/CreateIdea.svelte';
   import { api } from './lib/api.js';
@@ -56,6 +57,10 @@
       currentRoute = 'project';
       routeParams = { ideaId: parts[1] };
       setActiveIdea(parts[1]);
+    } else if (parts[0] === 'karkhana' && parts[1]) {
+      currentRoute = 'karkhana';
+      routeParams = { ideaId: parts[1], runId: parts[2] || '' };
+      setActiveIdea(parts[1]);
     } else if (parts[0] === 'workers') {
       currentRoute = 'workers';
       routeParams = {};
@@ -98,6 +103,8 @@
     <Actions ideaId={routeParams.ideaId} />
   {:else if currentRoute === 'project'}
     <ProjectTwinView ideaId={routeParams.ideaId} />
+  {:else if currentRoute === 'karkhana'}
+    <KarkhanaRunPanel factoryRunId={routeParams.runId} autonomyLevel="autonomous_development" />
   {:else if currentRoute === 'workers'}
     <LocalWorkers />
   {/if}

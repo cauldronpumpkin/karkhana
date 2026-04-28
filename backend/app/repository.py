@@ -306,6 +306,192 @@ class WorkerEvent:
     created_at: datetime = field(default_factory=utcnow)
 
 
+@dataclass
+class TemplateArtifact:
+    template_id: str
+    artifact_key: str
+    content_type: str
+    uri: str
+    content: str = ""
+    version: str = "1.0.0"
+    compatibility: dict = field(default_factory=dict)
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    metadata_: dict = field(default_factory=dict)
+    created_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
+class TemplatePack:
+    template_id: str
+    version: str
+    channel: str
+    display_name: str
+    description: str
+    phases: list[dict] = field(default_factory=list)
+    quality_gates: list[dict] = field(default_factory=list)
+    default_stack: dict = field(default_factory=dict)
+    constraints: list[dict] = field(default_factory=list)
+    opencode_worker: dict = field(default_factory=dict)
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: datetime = field(default_factory=utcnow)
+    updated_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
+class TemplateManifest:
+    template_id: str
+    version: str
+    artifact_keys: list[str] = field(default_factory=list)
+    metadata_: dict = field(default_factory=dict)
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
+class TemplateMemory:
+    template_id: str
+    key: str
+    value: str
+    category: str
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: datetime = field(default_factory=utcnow)
+    updated_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
+class TemplateUpdateProposal:
+    template_id: str
+    proposed_by: str
+    change_type: str
+    description: str
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    payload_uri: str | None = None
+    status: str = "pending"
+    created_at: datetime = field(default_factory=utcnow)
+    reviewed_at: datetime | None = None
+
+
+@dataclass
+class FactoryRunTrackingManifest:
+    factory_run_id: str
+    idea_id: str
+    template_id: str
+    template_version: str
+    run_config: dict = field(default_factory=dict)
+    run_status: str = "queued"
+    phase_summary: list[dict] = field(default_factory=list)
+    batch_summary: list[dict] = field(default_factory=list)
+    verification_summary: list[dict] = field(default_factory=list)
+    last_indexed_commit: str | None = None
+    graphify_status: str = "pending"
+    worker_queue_state: dict = field(default_factory=dict)
+    verification_state: dict = field(default_factory=dict)
+    artifact_uris: dict = field(default_factory=dict)
+    snapshot_uri: str | None = None
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: datetime = field(default_factory=utcnow)
+    updated_at: datetime = field(default_factory=utcnow)
+    completed_at: datetime | None = None
+
+
+@dataclass
+class FactoryRun:
+    idea_id: str
+    template_id: str
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    status: str = "queued"
+    config: dict = field(default_factory=dict)
+    tracking_manifest_uri: str | None = None
+    created_at: datetime = field(default_factory=utcnow)
+    updated_at: datetime = field(default_factory=utcnow)
+    completed_at: datetime | None = None
+
+
+@dataclass
+class FactoryPhase:
+    factory_run_id: str
+    phase_key: str
+    phase_order: int
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    status: str = "pending"
+    config_override: dict = field(default_factory=dict)
+    output_uri: str | None = None
+    created_at: datetime = field(default_factory=utcnow)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+@dataclass
+class FactoryBatch:
+    factory_phase_id: str
+    factory_run_id: str
+    batch_key: str
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    status: str = "pending"
+    worker_id: str | None = None
+    work_item_id: str | None = None
+    input_uri: str | None = None
+    output_uri: str | None = None
+    created_at: datetime = field(default_factory=utcnow)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+@dataclass
+class VerificationRun:
+    factory_batch_id: str
+    factory_run_id: str
+    verification_type: str
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    status: str = "pending"
+    result_uri: str | None = None
+    result_summary: str = ""
+    failure_classification: str = ""
+    command_output: str = ""
+    changed_files: list[str] = field(default_factory=list)
+    created_at: datetime = field(default_factory=utcnow)
+    completed_at: datetime | None = None
+
+
+FAILURE_CLASSIFICATIONS = frozenset({
+    "test", "build", "lint", "type", "migration",
+    "runtime", "integration", "dependency", "flaky",
+    "ambiguous", "security",
+})
+
+SECURITY_FAILURE = "security"
+BLOCKED_STATUS = "blocked"
+
+AUTONOMY_SUGGEST_ONLY = "suggest_only"
+AUTONOMY_AUTONOMOUS_DEVELOPMENT = "autonomous_development"
+AUTONOMY_FULL_AUTOPILOT = "full_autopilot"
+AUTONOMY_LEVELS = frozenset({
+    AUTONOMY_SUGGEST_ONLY,
+    AUTONOMY_AUTONOMOUS_DEVELOPMENT,
+    AUTONOMY_FULL_AUTOPILOT,
+})
+
+
+@dataclass
+class RepairTask:
+    factory_run_id: str
+    factory_batch_id: str
+    failure_classification: str
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    status: str = "pending"
+    attempt_number: int = 1
+    command_output: str = ""
+    recent_diff: str = ""
+    changed_files: list[str] = field(default_factory=list)
+    acceptance_criteria: list[str] = field(default_factory=list)
+    guardrails: list[str] = field(default_factory=list)
+    issue_summary: str = ""
+    work_item_id: str | None = None
+    created_at: datetime = field(default_factory=utcnow)
+    updated_at: datetime = field(default_factory=utcnow)
+    completed_at: datetime | None = None
+
+
 class Repository:
     async def create_idea(self, idea: Idea) -> Idea: ...
     async def get_idea(self, idea_id: str) -> Idea | None: ...
@@ -358,6 +544,41 @@ class Repository:
     async def get_worker_credential_lease(self, worker_id: str) -> WorkerCredentialLease | None: ...
     async def add_worker_event(self, event: WorkerEvent) -> WorkerEvent: ...
     async def list_worker_events(self, worker_id: str | None = None) -> list[WorkerEvent]: ...
+    async def save_template_pack(self, pack: TemplatePack) -> TemplatePack: ...
+    async def get_template_pack(self, template_id: str) -> TemplatePack | None: ...
+    async def list_template_packs(self) -> list[TemplatePack]: ...
+    async def save_template_artifact(self, artifact: TemplateArtifact) -> TemplateArtifact: ...
+    async def get_template_artifact(self, template_id: str, artifact_key: str) -> TemplateArtifact | None: ...
+    async def list_template_artifacts(self, template_id: str) -> list[TemplateArtifact]: ...
+    async def save_template_manifest(self, manifest: TemplateManifest) -> TemplateManifest: ...
+    async def get_template_manifest(self, template_id: str, version: str) -> TemplateManifest | None: ...
+    async def list_template_manifests(self, template_id: str) -> list[TemplateManifest]: ...
+    async def upsert_template_memory(self, memory: TemplateMemory) -> TemplateMemory: ...
+    async def get_template_memory(self, template_id: str, key: str) -> TemplateMemory | None: ...
+    async def list_template_memories(self, template_id: str, category: str | None = None) -> list[TemplateMemory]: ...
+    async def delete_template_memory(self, template_id: str, key: str) -> bool: ...
+    async def save_template_update_proposal(self, proposal: TemplateUpdateProposal) -> TemplateUpdateProposal: ...
+    async def get_template_update_proposal(self, template_id: str, proposal_id: str) -> TemplateUpdateProposal | None: ...
+    async def list_template_update_proposals(self, template_id: str, status: str | None = None) -> list[TemplateUpdateProposal]: ...
+    async def save_factory_run_tracking_manifest(self, manifest: FactoryRunTrackingManifest) -> FactoryRunTrackingManifest: ...
+    async def get_factory_run_tracking_manifest(self, run_id: str) -> FactoryRunTrackingManifest | None: ...
+    async def create_factory_run(self, run: FactoryRun) -> FactoryRun: ...
+    async def save_factory_run(self, run: FactoryRun) -> FactoryRun: ...
+    async def get_factory_run(self, run_id: str) -> FactoryRun | None: ...
+    async def list_factory_runs(self, idea_id: str | None = None, template_id: str | None = None, statuses: set[str] | None = None) -> list[FactoryRun]: ...
+    async def save_factory_phase(self, phase: FactoryPhase) -> FactoryPhase: ...
+    async def get_factory_phase(self, run_id: str, phase_id: str) -> FactoryPhase | None: ...
+    async def list_factory_phases(self, run_id: str) -> list[FactoryPhase]: ...
+    async def save_factory_batch(self, batch: FactoryBatch) -> FactoryBatch: ...
+    async def get_factory_batch(self, batch_id: str) -> FactoryBatch | None: ...
+    async def list_factory_batches(self, phase_id: str) -> list[FactoryBatch]: ...
+    async def save_verification_run(self, run: VerificationRun) -> VerificationRun: ...
+    async def get_verification_run(self, run_id: str) -> VerificationRun | None: ...
+    async def list_verification_runs(self, batch_id: str) -> list[VerificationRun]: ...
+    async def save_repair_task(self, task: RepairTask) -> RepairTask: ...
+    async def get_repair_task(self, task_id: str) -> RepairTask | None: ...
+    async def list_repair_tasks(self, factory_run_id: str, statuses: set[str] | None = None) -> list[RepairTask]: ...
+    async def list_repair_tasks_for_batch(self, factory_batch_id: str) -> list[RepairTask]: ...
 
 
 class InMemoryRepository(Repository):
@@ -380,6 +601,17 @@ class InMemoryRepository(Repository):
         self.worker_requests: dict[str, WorkerConnectionRequest] = {}
         self.worker_leases: dict[str, WorkerCredentialLease] = {}
         self.worker_events: dict[str, WorkerEvent] = {}
+        self.template_packs: dict[str, TemplatePack] = {}
+        self.template_artifacts: dict[tuple[str, str], TemplateArtifact] = {}
+        self.template_manifests: dict[tuple[str, str], TemplateManifest] = {}
+        self.template_memories: dict[tuple[str, str], TemplateMemory] = {}
+        self.template_update_proposals: dict[str, TemplateUpdateProposal] = {}
+        self.factory_tracking_manifests: dict[str, FactoryRunTrackingManifest] = {}
+        self.factory_runs: dict[str, FactoryRun] = {}
+        self.factory_phases: dict[str, FactoryPhase] = {}
+        self.factory_batches: dict[str, FactoryBatch] = {}
+        self.verification_runs: dict[str, VerificationRun] = {}
+        self.repair_tasks: dict[str, RepairTask] = {}
 
     async def create_idea(self, idea: Idea) -> Idea:
         self.ideas[idea.id] = idea
@@ -609,6 +841,166 @@ class InMemoryRepository(Repository):
                 if item.project_id == project_id and item.status not in {"completed", "cancelled", "failed_terminal"}
             ])
             project.updated_at = utcnow()
+
+    async def save_template_pack(self, pack: TemplatePack) -> TemplatePack:
+        pack.updated_at = utcnow()
+        self.template_packs[pack.template_id] = pack
+        return pack
+
+    async def get_template_pack(self, template_id: str) -> TemplatePack | None:
+        return self.template_packs.get(template_id)
+
+    async def list_template_packs(self) -> list[TemplatePack]:
+        return sorted(self.template_packs.values(), key=lambda p: p.updated_at, reverse=True)
+
+    async def save_template_artifact(self, artifact: TemplateArtifact) -> TemplateArtifact:
+        self.template_artifacts[(artifact.template_id, artifact.artifact_key)] = artifact
+        return artifact
+
+    async def get_template_artifact(self, template_id: str, artifact_key: str) -> TemplateArtifact | None:
+        return self.template_artifacts.get((template_id, artifact_key))
+
+    async def list_template_artifacts(self, template_id: str) -> list[TemplateArtifact]:
+        return [a for (tid, _), a in self.template_artifacts.items() if tid == template_id]
+
+    async def save_template_manifest(self, manifest: TemplateManifest) -> TemplateManifest:
+        self.template_manifests[(manifest.template_id, manifest.version)] = manifest
+        return manifest
+
+    async def get_template_manifest(self, template_id: str, version: str) -> TemplateManifest | None:
+        return self.template_manifests.get((template_id, version))
+
+    async def list_template_manifests(self, template_id: str) -> list[TemplateManifest]:
+        return sorted(
+            [m for (tid, _), m in self.template_manifests.items() if tid == template_id],
+            key=lambda m: m.created_at,
+            reverse=True,
+        )
+
+    async def upsert_template_memory(self, memory: TemplateMemory) -> TemplateMemory:
+        existing = self.template_memories.get((memory.template_id, memory.key))
+        if existing:
+            existing.value = memory.value
+            existing.category = memory.category
+            existing.updated_at = utcnow()
+            return existing
+        self.template_memories[(memory.template_id, memory.key)] = memory
+        return memory
+
+    async def get_template_memory(self, template_id: str, key: str) -> TemplateMemory | None:
+        return self.template_memories.get((template_id, key))
+
+    async def list_template_memories(self, template_id: str, category: str | None = None) -> list[TemplateMemory]:
+        memories = [m for (tid, _), m in self.template_memories.items() if tid == template_id]
+        if category:
+            memories = [m for m in memories if m.category == category]
+        return sorted(memories, key=lambda m: m.created_at)
+
+    async def delete_template_memory(self, template_id: str, key: str) -> bool:
+        return self.template_memories.pop((template_id, key), None) is not None
+
+    async def save_template_update_proposal(self, proposal: TemplateUpdateProposal) -> TemplateUpdateProposal:
+        self.template_update_proposals[proposal.id] = proposal
+        return proposal
+
+    async def get_template_update_proposal(self, template_id: str, proposal_id: str) -> TemplateUpdateProposal | None:
+        p = self.template_update_proposals.get(proposal_id)
+        return p if p and p.template_id == template_id else None
+
+    async def list_template_update_proposals(self, template_id: str, status: str | None = None) -> list[TemplateUpdateProposal]:
+        proposals = [p for p in self.template_update_proposals.values() if p.template_id == template_id]
+        if status:
+            proposals = [p for p in proposals if p.status == status]
+        return sorted(proposals, key=lambda p: p.created_at, reverse=True)
+
+    async def save_factory_run_tracking_manifest(self, manifest: FactoryRunTrackingManifest) -> FactoryRunTrackingManifest:
+        self.factory_tracking_manifests[manifest.factory_run_id] = manifest
+        return manifest
+
+    async def get_factory_run_tracking_manifest(self, run_id: str) -> FactoryRunTrackingManifest | None:
+        return self.factory_tracking_manifests.get(run_id)
+
+    async def create_factory_run(self, run: FactoryRun) -> FactoryRun:
+        self.factory_runs[run.id] = run
+        return run
+
+    async def save_factory_run(self, run: FactoryRun) -> FactoryRun:
+        run.updated_at = utcnow()
+        self.factory_runs[run.id] = run
+        return run
+
+    async def get_factory_run(self, run_id: str) -> FactoryRun | None:
+        return self.factory_runs.get(run_id)
+
+    async def list_factory_runs(self, idea_id: str | None = None, template_id: str | None = None, statuses: set[str] | None = None) -> list[FactoryRun]:
+        runs = list(self.factory_runs.values())
+        if idea_id:
+            runs = [r for r in runs if r.idea_id == idea_id]
+        if template_id:
+            runs = [r for r in runs if r.template_id == template_id]
+        if statuses:
+            runs = [r for r in runs if r.status in statuses]
+        return sorted(runs, key=lambda r: r.created_at, reverse=True)
+
+    async def save_factory_phase(self, phase: FactoryPhase) -> FactoryPhase:
+        self.factory_phases[phase.id] = phase
+        return phase
+
+    async def get_factory_phase(self, run_id: str, phase_id: str) -> FactoryPhase | None:
+        phase = self.factory_phases.get(phase_id)
+        return phase if phase and phase.factory_run_id == run_id else None
+
+    async def list_factory_phases(self, run_id: str) -> list[FactoryPhase]:
+        return sorted(
+            [p for p in self.factory_phases.values() if p.factory_run_id == run_id],
+            key=lambda p: p.phase_order,
+        )
+
+    async def save_factory_batch(self, batch: FactoryBatch) -> FactoryBatch:
+        self.factory_batches[batch.id] = batch
+        return batch
+
+    async def get_factory_batch(self, batch_id: str) -> FactoryBatch | None:
+        return self.factory_batches.get(batch_id)
+
+    async def list_factory_batches(self, phase_id: str) -> list[FactoryBatch]:
+        return sorted(
+            [b for b in self.factory_batches.values() if b.factory_phase_id == phase_id],
+            key=lambda b: b.created_at,
+        )
+
+    async def save_verification_run(self, run: VerificationRun) -> VerificationRun:
+        self.verification_runs[run.id] = run
+        return run
+
+    async def get_verification_run(self, run_id: str) -> VerificationRun | None:
+        return self.verification_runs.get(run_id)
+
+    async def list_verification_runs(self, batch_id: str) -> list[VerificationRun]:
+        return sorted(
+            [v for v in self.verification_runs.values() if v.factory_batch_id == batch_id],
+            key=lambda v: v.created_at,
+        )
+
+    async def save_repair_task(self, task: RepairTask) -> RepairTask:
+        task.updated_at = utcnow()
+        self.repair_tasks[task.id] = task
+        return task
+
+    async def get_repair_task(self, task_id: str) -> RepairTask | None:
+        return self.repair_tasks.get(task_id)
+
+    async def list_repair_tasks(self, factory_run_id: str, statuses: set[str] | None = None) -> list[RepairTask]:
+        tasks = [t for t in self.repair_tasks.values() if t.factory_run_id == factory_run_id]
+        if statuses:
+            tasks = [t for t in tasks if t.status in statuses]
+        return sorted(tasks, key=lambda t: t.created_at)
+
+    async def list_repair_tasks_for_batch(self, factory_batch_id: str) -> list[RepairTask]:
+        return sorted(
+            [t for t in self.repair_tasks.values() if t.factory_batch_id == factory_batch_id],
+            key=lambda t: t.created_at,
+        )
 
 
 class DynamoDBRepository(Repository):
@@ -990,6 +1382,313 @@ class DynamoDBRepository(Repository):
             raw = [_clean_from_dynamo(item) for item in response.get("Items", [])]
         return sorted([self._worker_event(item) for item in raw], key=lambda item: item.created_at, reverse=True)
 
+    async def save_template_pack(self, pack: TemplatePack) -> TemplatePack:
+        pack.updated_at = utcnow()
+        self._put({
+            "PK": f"TEMPLATE#{pack.template_id}",
+            "SK": "PACK#METADATA",
+            "entity": "TemplatePack",
+            "GSI1PK": "TEMPLATE_PACKS",
+            "GSI1SK": f"{_iso(pack.updated_at)}#{pack.id}",
+            **pack.__dict__,
+        })
+        return pack
+
+    async def get_template_pack(self, template_id: str) -> TemplatePack | None:
+        item = self.table.get_item(Key={"PK": f"TEMPLATE#{template_id}", "SK": "PACK#METADATA"}).get("Item")
+        return self._template_pack(_clean_from_dynamo(item)) if item else None
+
+    async def list_template_packs(self) -> list[TemplatePack]:
+        response = self.table.query(
+            IndexName="GSI1",
+            KeyConditionExpression=self._Key("GSI1PK").eq("TEMPLATE_PACKS"),
+            ScanIndexForward=False,
+        )
+        return [self._template_pack(_clean_from_dynamo(item)) for item in response.get("Items", [])]
+
+    async def save_template_artifact(self, artifact: TemplateArtifact) -> TemplateArtifact:
+        self._put({
+            "PK": f"TEMPLATE#{artifact.template_id}",
+            "SK": f"ARTIFACT#{artifact.artifact_key}",
+            "entity": "TemplateArtifact",
+            **artifact.__dict__,
+        })
+        return artifact
+
+    async def get_template_artifact(self, template_id: str, artifact_key: str) -> TemplateArtifact | None:
+        item = self.table.get_item(Key={"PK": f"TEMPLATE#{template_id}", "SK": f"ARTIFACT#{artifact_key}"}).get("Item")
+        return self._template_artifact(_clean_from_dynamo(item)) if item else None
+
+    async def list_template_artifacts(self, template_id: str) -> list[TemplateArtifact]:
+        return [self._template_artifact(i) for i in self._query_pk(f"TEMPLATE#{template_id}", "ARTIFACT#")]
+
+    async def save_template_manifest(self, manifest: TemplateManifest) -> TemplateManifest:
+        self._put({
+            "PK": f"TEMPLATE#{manifest.template_id}",
+            "SK": f"MANIFEST#{manifest.version}",
+            "entity": "TemplateManifest",
+            **manifest.__dict__,
+        })
+        return manifest
+
+    async def get_template_manifest(self, template_id: str, version: str) -> TemplateManifest | None:
+        item = self.table.get_item(Key={"PK": f"TEMPLATE#{template_id}", "SK": f"MANIFEST#{version}"}).get("Item")
+        return self._template_manifest(_clean_from_dynamo(item)) if item else None
+
+    async def list_template_manifests(self, template_id: str) -> list[TemplateManifest]:
+        return [self._template_manifest(i) for i in self._query_pk(f"TEMPLATE#{template_id}", "MANIFEST#")]
+
+    async def upsert_template_memory(self, memory: TemplateMemory) -> TemplateMemory:
+        existing = await self.get_template_memory(memory.template_id, memory.key)
+        if existing:
+            existing.value = memory.value
+            existing.category = memory.category
+            existing.updated_at = utcnow()
+            self._put({
+                "PK": f"TEMPLATE#{existing.template_id}",
+                "SK": f"TMEM#{existing.category}#{existing.key}",
+                "entity": "TemplateMemory",
+                **existing.__dict__,
+            })
+            return existing
+        self._put({
+            "PK": f"TEMPLATE#{memory.template_id}",
+            "SK": f"TMEM#{memory.category}#{memory.key}",
+            "entity": "TemplateMemory",
+            **memory.__dict__,
+        })
+        return memory
+
+    async def get_template_memory(self, template_id: str, key: str) -> TemplateMemory | None:
+        for m in await self.list_template_memories(template_id):
+            if m.key == key:
+                return m
+        return None
+
+    async def list_template_memories(self, template_id: str, category: str | None = None) -> list[TemplateMemory]:
+        prefix = f"TMEM#{category}#" if category else "TMEM#"
+        return [self._template_memory(i) for i in self._query_pk(f"TEMPLATE#{template_id}", prefix)]
+
+    async def delete_template_memory(self, template_id: str, key: str) -> bool:
+        memory = await self.get_template_memory(template_id, key)
+        if not memory:
+            return False
+        self.table.delete_item(Key={"PK": f"TEMPLATE#{template_id}", "SK": f"TMEM#{memory.category}#{key}"})
+        return True
+
+    async def save_template_update_proposal(self, proposal: TemplateUpdateProposal) -> TemplateUpdateProposal:
+        self._put({
+            "PK": f"TEMPLATE#{proposal.template_id}",
+            "SK": f"TProposal#{proposal.id}",
+            "entity": "TemplateUpdateProposal",
+            "GSI1PK": "T_PROPOSALS",
+            "GSI1SK": f"{proposal.status}#{_iso(proposal.created_at)}#{proposal.id}",
+            **proposal.__dict__,
+        })
+        return proposal
+
+    async def get_template_update_proposal(self, template_id: str, proposal_id: str) -> TemplateUpdateProposal | None:
+        item = self.table.get_item(Key={"PK": f"TEMPLATE#{template_id}", "SK": f"TProposal#{proposal_id}"}).get("Item")
+        return self._template_update_proposal(_clean_from_dynamo(item)) if item else None
+
+    async def list_template_update_proposals(self, template_id: str, status: str | None = None) -> list[TemplateUpdateProposal]:
+        proposals = [self._template_update_proposal(i) for i in self._query_pk(f"TEMPLATE#{template_id}", "TProposal#")]
+        if status:
+            proposals = [p for p in proposals if p.status == status]
+        return sorted(proposals, key=lambda p: p.created_at, reverse=True)
+
+    async def save_factory_run_tracking_manifest(self, manifest: FactoryRunTrackingManifest) -> FactoryRunTrackingManifest:
+        manifest.updated_at = utcnow()
+        self._put({
+            "PK": f"FACTORY_RUN#{manifest.factory_run_id}",
+            "SK": "MANIFEST",
+            "entity": "FactoryRunTrackingManifest",
+            "GSI1PK": f"IDEA#{manifest.idea_id}",
+            "GSI1SK": f"FRTM#{_iso(manifest.updated_at)}#{manifest.factory_run_id}",
+            "GSI2PK": f"TEMPLATE#{manifest.template_id}",
+            "GSI2SK": f"FRTM#{_iso(manifest.updated_at)}#{manifest.factory_run_id}",
+            **manifest.__dict__,
+        })
+        self.factory_tracking_manifests[manifest.factory_run_id] = manifest
+        return manifest
+
+    async def get_factory_run_tracking_manifest(self, run_id: str) -> FactoryRunTrackingManifest | None:
+        item = self.table.get_item(Key={"PK": f"FACTORY_RUN#{run_id}", "SK": "MANIFEST"}).get("Item")
+        return self._factory_run_tracking_manifest(_clean_from_dynamo(item)) if item else None
+
+    async def create_factory_run(self, run: FactoryRun) -> FactoryRun:
+        return await self.save_factory_run(run)
+
+    async def save_factory_run(self, run: FactoryRun) -> FactoryRun:
+        run.updated_at = utcnow()
+        self._put({
+            "PK": f"FACTORY_RUN#{run.id}",
+            "SK": "METADATA",
+            "entity": "FactoryRun",
+            "GSI1PK": f"IDEA#{run.idea_id}",
+            "GSI1SK": f"FRUN#{_iso(run.created_at)}#{run.id}",
+            "GSI2PK": f"TEMPLATE#{run.template_id}",
+            "GSI2SK": f"FRUN#{_iso(run.created_at)}#{run.id}",
+            **run.__dict__,
+        })
+        return run
+
+    async def get_factory_run(self, run_id: str) -> FactoryRun | None:
+        item = self.table.get_item(Key={"PK": f"FACTORY_RUN#{run_id}", "SK": "METADATA"}).get("Item")
+        return self._factory_run(_clean_from_dynamo(item)) if item else None
+
+    async def list_factory_runs(self, idea_id: str | None = None, template_id: str | None = None, statuses: set[str] | None = None) -> list[FactoryRun]:
+        if idea_id:
+            response = self.table.query(
+                IndexName="GSI1",
+                KeyConditionExpression=self._Key("GSI1PK").eq(f"IDEA#{idea_id}") & self._Key("GSI1SK").begins_with("FRUN#"),
+                ScanIndexForward=False,
+            )
+            raw = [_clean_from_dynamo(item) for item in response.get("Items", [])]
+        elif template_id:
+            response = self.table.query(
+                IndexName="GSI2",
+                KeyConditionExpression=self._Key("GSI2PK").eq(f"TEMPLATE#{template_id}") & self._Key("GSI2SK").begins_with("FRUN#"),
+                ScanIndexForward=False,
+            )
+            raw = [_clean_from_dynamo(item) for item in response.get("Items", [])]
+        else:
+            response = self.table.query(
+                IndexName="GSI1",
+                KeyConditionExpression=self._Key("GSI1PK").begins_with("IDEA#"),
+            )
+            raw = [_clean_from_dynamo(item) for item in response.get("Items", []) if item.get("entity") == "FactoryRun"]
+        runs = [self._factory_run(item) for item in raw]
+        if statuses:
+            runs = [r for r in runs if r.status in statuses]
+        return sorted(runs, key=lambda r: r.created_at, reverse=True)
+
+    async def save_factory_phase(self, phase: FactoryPhase) -> FactoryPhase:
+        self._put({
+            "PK": f"FACTORY_RUN#{phase.factory_run_id}",
+            "SK": f"PHASE#{phase.phase_order:03d}#{phase.phase_key}",
+            "entity": "FactoryPhase",
+            "GSI2PK": f"FRUN#{phase.factory_run_id}",
+            "GSI2SK": f"PHASE#{phase.phase_order:03d}",
+            **phase.__dict__,
+        })
+        return phase
+
+    async def get_factory_phase(self, run_id: str, phase_id: str) -> FactoryPhase | None:
+        for phase in await self.list_factory_phases(run_id):
+            if phase.id == phase_id:
+                return phase
+        return None
+
+    async def list_factory_phases(self, run_id: str) -> list[FactoryPhase]:
+        return [self._factory_phase(i) for i in self._query_pk(f"FACTORY_RUN#{run_id}", "PHASE#")]
+
+    async def save_factory_batch(self, batch: FactoryBatch) -> FactoryBatch:
+        self._put({
+            "PK": f"FACTORY_RUN#{batch.factory_run_id}",
+            "SK": f"BATCH#{batch.factory_phase_id}#{batch.batch_key}",
+            "entity": "FactoryBatch",
+            "GSI2PK": f"FPHASE#{batch.factory_phase_id}",
+            "GSI2SK": f"BATCH#{batch.batch_key}",
+            **batch.__dict__,
+        })
+        return batch
+
+    async def get_factory_batch(self, batch_id: str) -> FactoryBatch | None:
+        response = self.table.query(
+            IndexName="GSI2",
+            KeyConditionExpression=self._Key("GSI2SK").begins_with("BATCH#"),
+        )
+        for item in response.get("Items", []):
+            cleaned = _clean_from_dynamo(item)
+            if cleaned.get("id") == batch_id:
+                return self._factory_batch(cleaned)
+        return None
+
+    async def list_factory_batches(self, phase_id: str) -> list[FactoryBatch]:
+        response = self.table.query(
+            IndexName="GSI2",
+            KeyConditionExpression=self._Key("GSI2PK").eq(f"FPHASE#{phase_id}"),
+        )
+        return sorted(
+            [self._factory_batch(_clean_from_dynamo(item)) for item in response.get("Items", [])],
+            key=lambda b: b.created_at,
+        )
+
+    async def save_verification_run(self, run: VerificationRun) -> VerificationRun:
+        self._put({
+            "PK": f"FACTORY_RUN#{run.factory_run_id}",
+            "SK": f"VERIFY#{run.factory_batch_id}#{run.verification_type}",
+            "entity": "VerificationRun",
+            "GSI2PK": f"FBATCH#{run.factory_batch_id}",
+            "GSI2SK": f"VERIFY#{run.verification_type}",
+            **run.__dict__,
+        })
+        return run
+
+    async def get_verification_run(self, run_id: str) -> VerificationRun | None:
+        response = self.table.query(
+            IndexName="GSI2",
+            KeyConditionExpression=self._Key("GSI2SK").begins_with("VERIFY#"),
+        )
+        for item in response.get("Items", []):
+            cleaned = _clean_from_dynamo(item)
+            if cleaned.get("id") == run_id:
+                return self._verification_run(cleaned)
+        return None
+
+    async def list_verification_runs(self, batch_id: str) -> list[VerificationRun]:
+        response = self.table.query(
+            IndexName="GSI2",
+            KeyConditionExpression=self._Key("GSI2PK").eq(f"FBATCH#{batch_id}"),
+        )
+        return sorted(
+            [self._verification_run(_clean_from_dynamo(item)) for item in response.get("Items", [])],
+            key=lambda v: v.created_at,
+        )
+
+    async def save_repair_task(self, task: RepairTask) -> RepairTask:
+        task.updated_at = utcnow()
+        self._put({
+            "PK": f"FACTORY_RUN#{task.factory_run_id}",
+            "SK": f"REPAIR#{task.factory_batch_id}#{task.id}",
+            "entity": "RepairTask",
+            "GSI2PK": f"FBATCH#{task.factory_batch_id}",
+            "GSI2SK": f"REPAIR#{task.id}",
+            **task.__dict__,
+        })
+        return task
+
+    async def get_repair_task(self, task_id: str) -> RepairTask | None:
+        response = self.table.query(
+            IndexName="GSI2",
+            KeyConditionExpression=self._Key("GSI2SK").eq(f"REPAIR#{task_id}"),
+        )
+        for item in response.get("Items", []):
+            cleaned = _clean_from_dynamo(item)
+            if cleaned.get("id") == task_id:
+                return self._repair_task(cleaned)
+        return None
+
+    async def list_repair_tasks(self, factory_run_id: str, statuses: set[str] | None = None) -> list[RepairTask]:
+        response = self.table.query(
+            KeyConditionExpression=self._Key("PK").eq(f"FACTORY_RUN#{factory_run_id}") & self._Key("SK").begins_with("REPAIR#"),
+        )
+        tasks = [self._repair_task(_clean_from_dynamo(item)) for item in response.get("Items", [])]
+        if statuses:
+            tasks = [t for t in tasks if t.status in statuses]
+        return sorted(tasks, key=lambda t: t.created_at)
+
+    async def list_repair_tasks_for_batch(self, factory_batch_id: str) -> list[RepairTask]:
+        response = self.table.query(
+            IndexName="GSI2",
+            KeyConditionExpression=self._Key("GSI2PK").eq(f"FBATCH#{factory_batch_id}"),
+        )
+        return sorted(
+            [self._repair_task(_clean_from_dynamo(item)) for item in response.get("Items", []) if item.get("SK", "").startswith("REPAIR#")],
+            key=lambda t: t.created_at,
+        )
+
     def _idea(self, item: dict[str, Any]) -> Idea:
         return Idea(id=item["id"], title=item["title"], slug=item["slug"], description=item["description"], current_phase=item.get("current_phase", "capture"), status=item.get("status", "active"), source_type=item.get("source_type", "manual"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
 
@@ -1040,6 +1739,70 @@ class DynamoDBRepository(Repository):
 
     def _worker_event(self, item: dict[str, Any]) -> WorkerEvent:
         return WorkerEvent(id=item["id"], worker_id=item["worker_id"], event_type=item["event_type"], payload=item.get("payload") or {}, work_item_id=item.get("work_item_id"), status=item.get("status", "received"), created_at=_dt(item.get("created_at")) or utcnow())
+
+    def _template_pack(self, item: dict[str, Any]) -> TemplatePack:
+        return TemplatePack(id=item["id"], template_id=item["template_id"], version=item.get("version", "0.0.1"), channel=item.get("channel", "stable"), display_name=item.get("display_name", ""), description=item.get("description", ""), phases=item.get("phases") or [], quality_gates=item.get("quality_gates") or [], default_stack=item.get("default_stack") or {}, constraints=item.get("constraints") or [], opencode_worker=item.get("opencode_worker") or {}, created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
+
+    def _template_artifact(self, item: dict[str, Any]) -> TemplateArtifact:
+        return TemplateArtifact(
+            id=item["id"],
+            template_id=item["template_id"],
+            artifact_key=item["artifact_key"],
+            content_type=item.get("content_type", ""),
+            uri=item.get("uri", ""),
+            content=item.get("content", ""),
+            version=item.get("version", "1.0.0"),
+            compatibility=item.get("compatibility") or {},
+            metadata_=item.get("metadata_") or {},
+            created_at=_dt(item.get("created_at")) or utcnow(),
+        )
+
+    def _template_manifest(self, item: dict[str, Any]) -> TemplateManifest:
+        return TemplateManifest(id=item["id"], template_id=item["template_id"], version=item["version"], artifact_keys=item.get("artifact_keys") or [], metadata_=item.get("metadata_") or {}, created_at=_dt(item.get("created_at")) or utcnow())
+
+    def _template_memory(self, item: dict[str, Any]) -> TemplateMemory:
+        return TemplateMemory(id=item["id"], template_id=item["template_id"], key=item["key"], value=item["value"], category=item["category"], created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
+
+    def _template_update_proposal(self, item: dict[str, Any]) -> TemplateUpdateProposal:
+        return TemplateUpdateProposal(id=item["id"], template_id=item["template_id"], proposed_by=item["proposed_by"], change_type=item["change_type"], description=item.get("description", ""), payload_uri=item.get("payload_uri"), status=item.get("status", "pending"), created_at=_dt(item.get("created_at")) or utcnow(), reviewed_at=_dt(item.get("reviewed_at")))
+
+    def _factory_run(self, item: dict[str, Any]) -> FactoryRun:
+        return FactoryRun(id=item["id"], idea_id=item["idea_id"], template_id=item["template_id"], status=item.get("status", "queued"), config=item.get("config") or {}, tracking_manifest_uri=item.get("tracking_manifest_uri"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow(), completed_at=_dt(item.get("completed_at")))
+
+    def _factory_run_tracking_manifest(self, item: dict[str, Any]) -> FactoryRunTrackingManifest:
+        return FactoryRunTrackingManifest(
+            id=item["id"],
+            factory_run_id=item["factory_run_id"],
+            idea_id=item["idea_id"],
+            template_id=item["template_id"],
+            template_version=item.get("template_version", ""),
+            run_config=item.get("run_config") or {},
+            run_status=item.get("run_status", "queued"),
+            phase_summary=item.get("phase_summary") or [],
+            batch_summary=item.get("batch_summary") or [],
+            verification_summary=item.get("verification_summary") or [],
+            last_indexed_commit=item.get("last_indexed_commit"),
+            graphify_status=item.get("graphify_status", "pending"),
+            worker_queue_state=item.get("worker_queue_state") or {},
+            verification_state=item.get("verification_state") or {},
+            artifact_uris=item.get("artifact_uris") or {},
+            snapshot_uri=item.get("snapshot_uri"),
+            created_at=_dt(item.get("created_at")) or utcnow(),
+            updated_at=_dt(item.get("updated_at")) or utcnow(),
+            completed_at=_dt(item.get("completed_at")),
+        )
+
+    def _factory_phase(self, item: dict[str, Any]) -> FactoryPhase:
+        return FactoryPhase(id=item["id"], factory_run_id=item["factory_run_id"], phase_key=item["phase_key"], phase_order=int(item.get("phase_order", 0)), status=item.get("status", "pending"), config_override=item.get("config_override") or {}, output_uri=item.get("output_uri"), created_at=_dt(item.get("created_at")) or utcnow(), started_at=_dt(item.get("started_at")), completed_at=_dt(item.get("completed_at")))
+
+    def _factory_batch(self, item: dict[str, Any]) -> FactoryBatch:
+        return FactoryBatch(id=item["id"], factory_phase_id=item["factory_phase_id"], factory_run_id=item["factory_run_id"], batch_key=item["batch_key"], status=item.get("status", "pending"), worker_id=item.get("worker_id"), work_item_id=item.get("work_item_id"), input_uri=item.get("input_uri"), output_uri=item.get("output_uri"), created_at=_dt(item.get("created_at")) or utcnow(), started_at=_dt(item.get("started_at")), completed_at=_dt(item.get("completed_at")))
+
+    def _verification_run(self, item: dict[str, Any]) -> VerificationRun:
+        return VerificationRun(id=item["id"], factory_batch_id=item["factory_batch_id"], factory_run_id=item["factory_run_id"], verification_type=item["verification_type"], status=item.get("status", "pending"), result_uri=item.get("result_uri"), result_summary=item.get("result_summary", ""), failure_classification=item.get("failure_classification", ""), command_output=item.get("command_output", ""), changed_files=item.get("changed_files") or [], created_at=_dt(item.get("created_at")) or utcnow(), completed_at=_dt(item.get("completed_at")))
+
+    def _repair_task(self, item: dict[str, Any]) -> RepairTask:
+        return RepairTask(id=item["id"], factory_run_id=item["factory_run_id"], factory_batch_id=item["factory_batch_id"], failure_classification=item.get("failure_classification", ""), status=item.get("status", "pending"), attempt_number=int(item.get("attempt_number", 1)), command_output=item.get("command_output", ""), recent_diff=item.get("recent_diff", ""), changed_files=item.get("changed_files") or [], acceptance_criteria=item.get("acceptance_criteria") or [], guardrails=item.get("guardrails") or [], issue_summary=item.get("issue_summary", ""), work_item_id=item.get("work_item_id"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow(), completed_at=_dt(item.get("completed_at")))
 
 
 _repo: Repository | None = None

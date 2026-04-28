@@ -13,6 +13,9 @@ fn test_config_roundtrip() {
         capabilities: vec!["repo_index".to_string()],
         tenant_id: Some("test-tenant".to_string()),
         openclaude: HashMap::new(),
+        opencode_server_url: None,
+        litellm_port: None,
+        litellm_config: None,
     };
 
     let temp_dir = std::env::temp_dir().join("idearefinery-worker-test");
@@ -43,6 +46,7 @@ fn test_state_roundtrip() {
             secret_access_key: Some("secret".to_string()),
             session_token: None,
         },
+        worker_auth_token: None,
     };
 
     let json = serde_json::to_string_pretty(&state).unwrap();
@@ -55,16 +59,15 @@ fn test_state_roundtrip() {
 #[test]
 fn test_default_config() {
     let config = WorkerConfig::default();
-    assert_eq!(config.api_base, "http://localhost:8000");
-    assert_eq!(config.engine, "openclaude");
+    assert_eq!(config.api_base, "https://api.karkhana.one");
+    assert_eq!(config.engine, "opencode-server");
     assert!(config.capabilities.contains(&"repo_index".to_string()));
 }
 
 #[test]
 fn test_api_client_construction() {
     use idearefinery_worker_lib::api::ApiClient;
-    let client = ApiClient::new("http://localhost:8000".to_string(), "test-token".to_string());
-    // If it constructs, the URL and token are stored correctly
+    let _client = ApiClient::new("http://localhost:8000".to_string(), "test-token".to_string());
     assert!(true);
 }
 

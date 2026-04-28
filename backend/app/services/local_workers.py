@@ -163,10 +163,24 @@ class LocalWorkerService:
                 return {"job": await project_service.heartbeat_job(payload["work_item_id"], payload["claim_token"], worker_id, payload.get("logs", ""))}
             return {"ok": True}
         if event_type == "job_completed":
-            return {"job": await project_service.complete_job(payload["work_item_id"], payload["claim_token"], worker_id, payload.get("result") or {}, payload.get("logs", ""))}
+            job_result = await project_service.complete_job(payload["work_item_id"], payload["claim_token"], worker_id, payload.get("result") or {}, payload.get("logs", ""))
+            await self._orchestrate_factory(payload.get("work_item_id"), "completed")
+            return {"job": job_result}
         if event_type == "job_failed":
-            return {"job": await project_service.fail_job(payload["work_item_id"], payload["claim_token"], worker_id, payload.get("error") or "Worker failed", bool(payload.get("retryable", True)), payload.get("logs", ""))}
+            job_result = await project_service.fail_job(payload["work_item_id"], payload["claim_token"], worker_id, payload.get("error") or "Worker failed", bool(payload.get("retryable", True)), payload.get("logs", ""))
+            await self._orchestrate_factory(payload.get("work_item_id"), "failed")
+            return {"job": job_result}
         return {"ok": True}
+
+    async def _orchestrate_factory(self, work_item_id: str | None, event: str) -> None:
+        if not work_item_id:
+            return
+        from backend.app.services.factory_orchestrator import FactoryOrchestratorService
+        orchestrator = FactoryOrchestratorService()
+        if event == "completed":
+            await orchestrator.on_task_completed(work_item_id)
+        elif event == "failed":
+            await orchestrator.on_task_failed(work_item_id)
 
     async def process_sqs_records(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         processed = 0

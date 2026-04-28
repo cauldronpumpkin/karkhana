@@ -5,6 +5,23 @@ use std::collections::HashMap;
 use std::path::Path;
 use tokio::process::Command;
 
+pub const LIMITED_ENGINES: &[&str] = &["opencode", "openclaude", "codex"];
+
+pub fn is_limited_engine(engine: &str) -> bool {
+    LIMITED_ENGINES.contains(&engine)
+}
+
+pub fn is_valid_for_high_autonomy(engine: &str, capabilities: &[String]) -> bool {
+    if engine == "opencode-server" {
+        return true;
+    }
+    if is_limited_engine(engine) {
+        let required = crate::types::HIGH_AUTONOMY_REQUIRED_CAPABILITIES;
+        return required.iter().all(|cap| capabilities.iter().any(|c| c == cap));
+    }
+    false
+}
+
 pub enum EngineMode {
     Cli,
     Server { base_url: String },

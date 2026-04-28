@@ -65,3 +65,27 @@ export async function apiDelete(path, options = {}) {
     ...options,
   });
 }
+
+export async function createFactoryRun(projectId, body = {}) {
+  return apiPost(`/api/projects/${projectId}/factory-runs`, {
+    template_id: body.template_id || 'default',
+    autonomy_level: body.autonomy_level || 'autonomous_development',
+    config: body.config || {},
+  });
+}
+
+export async function listFactoryRuns(projectId) {
+  return api(`/api/projects/${projectId}/factory-runs`);
+}
+
+export async function getFactoryRun(factoryRunId) {
+  return api(`/api/factory-runs/${factoryRunId}`);
+}
+
+export async function getProjectTwin(ideaId) {
+  return api(`/api/ideas/${ideaId}/project`);
+}
+
+export async function getFactoryRunJobs(ideaId) {
+  return api(`/api/ideas/${ideaId}/jobs`);
+}

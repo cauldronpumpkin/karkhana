@@ -56,6 +56,21 @@ pub async fn branch_work<P: AsRef<Path>>(
         git::git_push(repo_dir, &branch, "origin", logs).await.ok();
     }
 
+    let has_graphify_cmd = payload.get("verification_commands")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).any(|c| c.contains("graphify update")))
+        .unwrap_or(false);
+    let graphify_updated = if has_graphify_cmd {
+        let mut graphify_logs: Vec<String> = Vec::new();
+        let result = crate::worker::run_graphify_update(repo_dir, &mut graphify_logs).await;
+        for line in graphify_logs {
+            logs.push(line);
+        }
+        result
+    } else {
+        false
+    };
+
     Ok(BranchWorkResult {
         branch_name: branch,
         commit_sha,
@@ -63,6 +78,7 @@ pub async fn branch_work<P: AsRef<Path>>(
         agent_output: output,
         tests_passed,
         full_control_used: full_control,
+        graphify_updated,
     })
 }
 

@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     ai_provider: str = Field(default="zai", alias="AI_PROVIDER")
     ai_model: str = Field(default="glm-5.1", alias="AI_MODEL")
@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     worker_client_role_arn: str = Field(default="", alias="IDEAREFINERY_WORKER_CLIENT_ROLE_ARN")
     worker_credential_ttl_seconds: int = Field(default=3600, alias="IDEAREFINERY_WORKER_CREDENTIAL_TTL_SECONDS")
     worker_sqs_region: str = Field(default="us-east-1", alias="IDEAREFINERY_WORKER_SQS_REGION")
+    max_repair_attempts_per_task: int = Field(default=3, alias="IDEAREFINERY_MAX_REPAIR_ATTEMPTS_PER_TASK")
+    max_repair_attempts_per_batch: int = Field(default=5, alias="IDEAREFINERY_MAX_REPAIR_ATTEMPTS_PER_BATCH")
     claude_settings_path: str = Field(
         default=str(Path.home() / ".claude" / "settings.json"),
         alias="CLAUDE_SETTINGS_PATH",

@@ -3,6 +3,7 @@
     BarChart3,
     Blocks,
     Box,
+    Cog,
     FileText,
     GitBranch,
     LayoutDashboard,
@@ -20,6 +21,7 @@
     { name: 'Dashboard', route: 'dashboard', icon: LayoutDashboard, requiresIdea: false },
     { name: 'Chat', route: 'chat', icon: MessageCircle, requiresIdea: true },
     { name: 'Project Twin', route: 'project', icon: GitBranch, requiresIdea: true },
+    { name: 'Karkhana AI', route: 'karkhana', icon: Cog, requiresIdea: true },
     { name: 'Reports', route: 'reports', icon: FileText, requiresIdea: true },
     { name: 'Research Actions', route: 'actions', icon: BarChart3, requiresIdea: true }
   ];

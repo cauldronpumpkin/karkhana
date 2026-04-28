@@ -11,6 +11,19 @@ pub const DEFAULT_CAPABILITIES: &[&str] = &[
     "sync_remote_state",
 ];
 
+pub const OPENCODE_SERVER_CAPABILITIES: &[&str] = &[
+    "permission_guard",
+    "circuit_breaker",
+    "litellm_proxy",
+    "diff_api",
+    "verification_runner",
+    "graphify_update",
+];
+
+pub const HIGH_AUTONOMY_REQUIRED_CAPABILITIES: &[&str] = OPENCODE_SERVER_CAPABILITIES;
+
+pub const LIMITED_ENGINES: &[&str] = &["opencode", "openclaude", "codex"];
+
 pub const SKIP_DIRS: &[&str] = &[
     ".git",
     "node_modules",
@@ -268,6 +281,8 @@ pub struct BranchWorkResult {
     pub agent_output: String,
     pub tests_passed: bool,
     pub full_control_used: bool,
+    #[serde(default)]
+    pub graphify_updated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

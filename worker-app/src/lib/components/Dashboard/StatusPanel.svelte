@@ -9,6 +9,37 @@
   let status = $state('idle')
   let health = $state({ connected: false, lastHeartbeat: null, uptime: 0 })
 
+  const limitedEngines = ['opencode', 'openclaude', 'codex']
+  const highAutonomyCaps = [
+    'permission_guard', 'circuit_breaker', 'litellm_proxy',
+    'diff_api', 'verification_runner', 'graphify_update',
+  ]
+
+  let engineLabel = $derived.by(() => {
+    const e = config.engine
+    if (!e) return { text: '—', variant: 'muted' }
+    if (e === 'opencode-server') return { text: 'opencode-server', variant: 'success' }
+    if (limitedEngines.includes(e)) return { text: e + ' (limited)', variant: 'error' }
+    return { text: e, variant: 'warning' }
+  })
+
+  let engineNote = $derived.by(() => {
+    const e = config.engine
+    if (!e) return ''
+    if (e === 'opencode-server') return ''
+    if (limitedEngines.includes(e)) {
+      return 'Limited fallback mode — not valid for Full Autopilot or Autonomous Development. Set engine to opencode-server.'
+    }
+    return ''
+  })
+
+  let capStatus = $derived.by(() => {
+    const caps = config.capabilities || []
+    const missing = highAutonomyCaps.filter(c => !caps.includes(c))
+    if (missing.length === 0) return { text: 'Full', variant: 'success' }
+    return { text: `Missing: ${missing.length}`, variant: 'error' }
+  })
+
   onMount(async () => {
     try {
       config = await invoke('load_config_command')
@@ -30,6 +61,12 @@
 </script>
 
 <Card title="Worker Status">
+  {#if engineNote}
+    <div class="warning-banner">
+      <strong>Engine:</strong> {engineNote}
+    </div>
+  {/if}
+
   <div class="status-grid">
     <article class="metric">
       <span class="mono-label">Status</span>
@@ -49,7 +86,11 @@
     </article>
     <article class="metric">
       <span class="mono-label">Engine</span>
-      <strong>{config.engine || '—'}</strong>
+      <Badge variant={engineLabel.variant}>{engineLabel.text}</Badge>
+    </article>
+    <article class="metric">
+      <span class="mono-label">Capabilities</span>
+      <Badge variant={capStatus.variant}>{capStatus.text}</Badge>
     </article>
     <article class="metric">
       <span class="mono-label">Platform</span>
@@ -70,7 +111,7 @@
       <span class="mono-label">Capabilities</span>
       <div class="capability-list">
         {#each config.capabilities as cap}
-          <Badge variant="primary">{cap}</Badge>
+          <Badge variant={highAutonomyCaps.includes(cap) ? 'accent' : 'primary'}>{cap}</Badge>
         {/each}
       </div>
     </div>
@@ -107,6 +148,16 @@
     flex-wrap: wrap;
     gap: var(--spacing-sm);
     margin-top: var(--spacing-sm);
+  }
+
+  .warning-banner {
+    background: rgba(255, 193, 7, 0.15);
+    border: 1px solid var(--color-warning, #ffc107);
+    border-radius: var(--border-radius-md);
+    color: var(--color-warning, #ffc107);
+    font-size: 0.85rem;
+    margin-bottom: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-md);
   }
 
   @media (max-width: 640px) {

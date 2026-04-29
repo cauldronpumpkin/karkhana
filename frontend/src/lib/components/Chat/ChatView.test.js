@@ -20,12 +20,12 @@ describe('ChatView', () => {
     apiModule.api.mockImplementation(async (path) => {
       if (path === '/api/ai/models') {
         return {
-          active: { provider: 'zai', model: 'glm-5.1' },
+          active: { provider: 'codex-lb', model: 'gpt-5.5' },
           providers: [
             {
-              id: 'zai',
-              name: 'Z.ai Coding Plan',
-              models: ['glm-5.1'],
+              id: 'codex-lb',
+              name: 'Codex LB',
+              models: ['gpt-5.5'],
             },
           ],
         };
@@ -57,8 +57,8 @@ describe('ChatView', () => {
     await vi.waitFor(() => {
       expect(apiModule.apiPost).toHaveBeenCalledWith('/api/ideas/test-idea/chat/message', {
         message: 'Hello',
-        provider: 'zai',
-        model: 'glm-5.1',
+        provider: 'codex-lb',
+        model: 'gpt-5.5',
       });
       expect(screen.getByText('Mock reply')).toBeInTheDocument();
     });

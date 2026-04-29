@@ -74,6 +74,7 @@ export async function createFactoryRun(projectId, body = {}) {
     template_id: body.template_id || 'default',
     autonomy_level: body.autonomy_level || 'autonomous_development',
     config: body.config || {},
+    intent: body.intent || null,
   });
 }
 
@@ -85,10 +86,58 @@ export async function getFactoryRun(factoryRunId) {
   return api(`/api/factory-runs/${factoryRunId}`);
 }
 
+export async function createResearchArtifact(factoryRunId, body = {}) {
+  return apiPost(`/api/factory-runs/${factoryRunId}/research-artifacts`, {
+    title: body.title,
+    source: body.source,
+    raw_content: body.raw_content ?? null,
+    raw_content_uri: body.raw_content_uri ?? null,
+    raw_metadata: body.raw_metadata || {},
+    normalized: body.normalized ?? null,
+    force: body.force || false,
+    correlation_id: body.correlation_id ?? null,
+    actor: body.actor || 'system',
+  });
+}
+
+export async function createResearchHandoff(factoryRunId) {
+  return apiPost(`/api/factory-runs/${factoryRunId}/research-handoff`, {});
+}
+
 export async function getProjectTwin(ideaId) {
   return api(`/api/ideas/${ideaId}/project`);
 }
 
 export async function getFactoryRunJobs(ideaId) {
   return api(`/api/ideas/${ideaId}/jobs`);
+}
+
+export async function createReviewPacket(factoryRunId) {
+  return apiPost(`/api/factory-runs/${factoryRunId}/review-packet`);
+}
+
+export async function getReviewPacket(factoryRunId) {
+  return api(`/api/factory-runs/${factoryRunId}/review-packet`);
+}
+
+export async function listReviewPackets(filter = null) {
+  const params = filter ? `?filter=${filter}` : '';
+  return api(`/api/review-packets${params}`);
+}
+
+export async function submitIntervention(factoryRunId, action, rationale = null) {
+  return apiPost(`/api/factory-runs/${factoryRunId}/review-packet/intervene`, {
+    action,
+    rationale,
+  });
+}
+
+export async function startWaitWindow(factoryRunId, expiresAt = null) {
+  return apiPost(`/api/factory-runs/${factoryRunId}/review-packet/start-wait-window`, {
+    expires_at: expiresAt,
+  });
+}
+
+export async function recordExpiry(factoryRunId) {
+  return apiPost(`/api/factory-runs/${factoryRunId}/review-packet/record-expiry`);
 }

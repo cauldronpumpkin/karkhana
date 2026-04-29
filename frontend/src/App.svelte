@@ -8,6 +8,9 @@
   import ProjectTwinView from './lib/components/ProjectTwin/ProjectTwinView.svelte';
   import KarkhanaRunPanel from './lib/components/Karkhana/KarkhanaRunPanel.svelte';
   import LocalWorkers from './lib/components/LocalWorkers/LocalWorkers.svelte';
+  import TemplatesView from './lib/components/Templates/TemplatesView.svelte';
+  import ReviewCockpitList from './lib/components/ReviewCockpit/ReviewCockpitList.svelte';
+  import ReviewCockpitDetail from './lib/components/ReviewCockpit/ReviewCockpitDetail.svelte';
   import CreateIdea from './lib/components/Dashboard/CreateIdea.svelte';
   import { api } from './lib/api.js';
 
@@ -64,6 +67,15 @@
     } else if (parts[0] === 'workers') {
       currentRoute = 'workers';
       routeParams = {};
+    } else if (parts[0] === 'templates') {
+      currentRoute = 'templates';
+      routeParams = {};
+    } else if (parts[0] === 'review' && parts[1]) {
+      currentRoute = 'review-detail';
+      routeParams = { factoryRunId: parts[1] };
+    } else if (parts[0] === 'review') {
+      currentRoute = 'review';
+      routeParams = {};
     } else {
       currentRoute = 'dashboard';
       routeParams = {};
@@ -107,6 +119,12 @@
     <KarkhanaRunPanel factoryRunId={routeParams.runId} autonomyLevel="autonomous_development" />
   {:else if currentRoute === 'workers'}
     <LocalWorkers />
+  {:else if currentRoute === 'templates'}
+    <TemplatesView />
+  {:else if currentRoute === 'review'}
+    <ReviewCockpitList />
+  {:else if currentRoute === 'review-detail'}
+    <ReviewCockpitDetail factoryRunId={routeParams.factoryRunId} />
   {/if}
 </AppShell>
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -116,6 +116,36 @@ class ResearchTask:
 
 
 @dataclass
+class ArtifactMetadata:
+    source: str
+    source_uri: str | None = None
+    actor: str | None = None
+    correlation_id: str | None = None
+    dedupe_hash: str | None = None
+    tags: list[str] = field(default_factory=list)
+    extra: dict = field(default_factory=dict)
+    created_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
+class Intent:
+    idea_id: str
+    project_id: str
+    summary: str
+    details: dict = field(default_factory=dict)
+    correlation_id: str | None = None
+    dedupe_hash: str | None = None
+    budget: dict = field(default_factory=dict)
+    stop_conditions: list[str] = field(default_factory=list)
+    factory_run_ids: list[str] = field(default_factory=list)
+    source: str = "manual"
+    status: str = "active"
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: datetime = field(default_factory=utcnow)
+    updated_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
 class Report:
     idea_id: str
     phase: str
@@ -192,6 +222,23 @@ class CodeIndexArtifact:
 
 
 @dataclass
+class ResearchArtifact:
+    factory_run_id: str
+    title: str
+    source: str
+    raw_content: str | None = None
+    raw_content_uri: str | None = None
+    raw_metadata: dict = field(default_factory=dict)
+    normalized: dict = field(default_factory=dict)
+    artifact_metadata: ArtifactMetadata = field(default_factory=lambda: ArtifactMetadata(source="research"))
+    dedupe_hash: str = ""
+    status: str = "active"
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    created_at: datetime = field(default_factory=utcnow)
+    updated_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
 class WorkItem:
     idea_id: str
     project_id: str
@@ -200,6 +247,13 @@ class WorkItem:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     status: str = "queued"
     priority: int = 50
+    factory_run_id: str | None = None
+    parent_work_item_id: str | None = None
+    rationale: str | None = None
+    correlation_id: str | None = None
+    dedupe_hash: str | None = None
+    budget: dict = field(default_factory=dict)
+    stop_conditions: list[str] = field(default_factory=list)
     idempotency_key: str | None = None
     worker_id: str | None = None
     claim_token: str | None = None
@@ -301,6 +355,12 @@ class WorkerEvent:
     event_type: str
     payload: dict = field(default_factory=dict)
     work_item_id: str | None = None
+    factory_run_id: str | None = None
+    research_artifact_id: str | None = None
+    review_packet_id: str | None = None
+    correlation_id: str | None = None
+    idempotency_key: str | None = None
+    actor: str | None = None
     status: str = "received"
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = field(default_factory=utcnow)
@@ -401,6 +461,12 @@ class FactoryRun:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     status: str = "queued"
     config: dict = field(default_factory=dict)
+    intent_id: str | None = None
+    run_type: str = "standard"
+    correlation_id: str | None = None
+    dedupe_hash: str | None = None
+    budget: dict = field(default_factory=dict)
+    stop_conditions: list[str] = field(default_factory=list)
     tracking_manifest_uri: str | None = None
     created_at: datetime = field(default_factory=utcnow)
     updated_at: datetime = field(default_factory=utcnow)
@@ -451,6 +517,55 @@ class VerificationRun:
     changed_files: list[str] = field(default_factory=list)
     created_at: datetime = field(default_factory=utcnow)
     completed_at: datetime | None = None
+
+
+WAIT_WINDOW_STATES = frozenset({
+    "awaiting_review",
+    "wait_window",
+    "no_objection_recorded",
+    "ready_to_continue",
+    "approved",
+    "rejected",
+    "modification_requested",
+    "paused",
+})
+
+IMPACT_SCORES = frozenset({"low", "medium", "high"})
+
+
+@dataclass
+class ReviewPacket:
+    run_id: str
+    promise: str = ""
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    packet_type: str = "standard"
+    status: str = "awaiting_review"
+    wait_window_state: str = "awaiting_review"
+    branch_name: str | None = None
+    worker_id: str | None = None
+    worker_display_name: str | None = None
+    worker_machine_name: str | None = None
+    autonomy_level: str | None = None
+    template_id: str | None = None
+    template_version: str | None = None
+    blast_radius: dict = field(default_factory=dict)
+    safety_net_results: dict = field(default_factory=dict)
+    execution_trace: dict = field(default_factory=dict)
+    changed_files: list[str] = field(default_factory=list)
+    diff_summary_uri: str | None = None
+    evaluator_verdict: dict = field(default_factory=dict)
+    decision_gates: dict = field(default_factory=dict)
+    allowed_actions: list[str] = field(default_factory=list)
+    research_artifact_ids: list[str] = field(default_factory=list)
+    research_handoff: dict = field(default_factory=dict)
+    expert_reviews: list[dict] = field(default_factory=list)
+    council_summary: dict = field(default_factory=dict)
+    telemetry_events: list[dict] = field(default_factory=list)
+    created_at: datetime = field(default_factory=utcnow)
+    wait_window_started_at: datetime | None = None
+    expires_at: datetime | None = None
+    resolved_at: datetime | None = None
+    updated_at: datetime = field(default_factory=utcnow)
 
 
 FAILURE_CLASSIFICATIONS = frozenset({
@@ -519,12 +634,18 @@ class Repository:
     async def save_github_installation(self, installation: GitHubInstallation) -> GitHubInstallation: ...
     async def list_github_installations(self) -> list[GitHubInstallation]: ...
     async def get_github_installation(self, installation_id: str) -> GitHubInstallation | None: ...
+    async def save_intent(self, intent: Intent) -> Intent: ...
+    async def get_intent(self, idea_id: str, intent_id: str) -> Intent | None: ...
+    async def list_intents(self, idea_id: str | None = None, project_id: str | None = None) -> list[Intent]: ...
     async def save_project_twin(self, project: ProjectTwin) -> ProjectTwin: ...
     async def get_project_twin(self, idea_id: str) -> ProjectTwin | None: ...
     async def get_project_twin_by_id(self, project_id: str) -> ProjectTwin | None: ...
     async def list_project_twins(self) -> list[ProjectTwin]: ...
     async def put_code_index(self, artifact: CodeIndexArtifact) -> CodeIndexArtifact: ...
     async def get_latest_code_index(self, idea_id: str) -> CodeIndexArtifact | None: ...
+    async def save_research_artifact(self, artifact: ResearchArtifact) -> ResearchArtifact: ...
+    async def get_research_artifact(self, factory_run_id: str, artifact_id: str) -> ResearchArtifact | None: ...
+    async def list_research_artifacts(self, factory_run_id: str, statuses: set[str] | None = None) -> list[ResearchArtifact]: ...
     async def enqueue_work_item(self, item: WorkItem) -> WorkItem: ...
     async def save_work_item(self, item: WorkItem) -> WorkItem: ...
     async def get_work_item(self, item_id: str) -> WorkItem | None: ...
@@ -565,7 +686,7 @@ class Repository:
     async def create_factory_run(self, run: FactoryRun) -> FactoryRun: ...
     async def save_factory_run(self, run: FactoryRun) -> FactoryRun: ...
     async def get_factory_run(self, run_id: str) -> FactoryRun | None: ...
-    async def list_factory_runs(self, idea_id: str | None = None, template_id: str | None = None, statuses: set[str] | None = None) -> list[FactoryRun]: ...
+    async def list_factory_runs(self, idea_id: str | None = None, template_id: str | None = None, intent_id: str | None = None, statuses: set[str] | None = None) -> list[FactoryRun]: ...
     async def save_factory_phase(self, phase: FactoryPhase) -> FactoryPhase: ...
     async def get_factory_phase(self, run_id: str, phase_id: str) -> FactoryPhase | None: ...
     async def list_factory_phases(self, run_id: str) -> list[FactoryPhase]: ...
@@ -579,6 +700,10 @@ class Repository:
     async def get_repair_task(self, task_id: str) -> RepairTask | None: ...
     async def list_repair_tasks(self, factory_run_id: str, statuses: set[str] | None = None) -> list[RepairTask]: ...
     async def list_repair_tasks_for_batch(self, factory_batch_id: str) -> list[RepairTask]: ...
+    async def save_review_packet(self, packet: ReviewPacket) -> ReviewPacket: ...
+    async def get_review_packet(self, run_id: str) -> ReviewPacket | None: ...
+    async def get_review_packet_by_id(self, packet_id: str) -> ReviewPacket | None: ...
+    async def list_review_packets(self, wait_window_states: set[str] | None = None, statuses: set[str] | None = None) -> list[ReviewPacket]: ...
 
 
 class InMemoryRepository(Repository):
@@ -592,8 +717,11 @@ class InMemoryRepository(Repository):
         self.reports: dict[tuple[str, str], Report] = {}
         self.relationships: list[IdeaRelationship] = []
         self.github_installations: dict[str, GitHubInstallation] = {}
+        self.intents: dict[tuple[str, str], Intent] = {}
+        self.intents_by_project: dict[tuple[str, str], Intent] = {}
         self.project_twins: dict[str, ProjectTwin] = {}
         self.code_indexes: dict[str, list[CodeIndexArtifact]] = {}
+        self.research_artifacts: dict[tuple[str, str], ResearchArtifact] = {}
         self.work_items: dict[str, WorkItem] = {}
         self.agent_runs: dict[str, AgentRun] = {}
         self.project_commits: dict[str, ProjectCommit] = {}
@@ -612,6 +740,8 @@ class InMemoryRepository(Repository):
         self.factory_batches: dict[str, FactoryBatch] = {}
         self.verification_runs: dict[str, VerificationRun] = {}
         self.repair_tasks: dict[str, RepairTask] = {}
+        self.review_packets_by_run: dict[str, ReviewPacket] = {}
+        self.review_packets: dict[str, ReviewPacket] = {}
 
     async def create_idea(self, idea: Idea) -> Idea:
         self.ideas[idea.id] = idea
@@ -724,6 +854,23 @@ class InMemoryRepository(Repository):
     async def get_github_installation(self, installation_id: str) -> GitHubInstallation | None:
         return self.github_installations.get(str(installation_id))
 
+    async def save_intent(self, intent: Intent) -> Intent:
+        intent.updated_at = utcnow()
+        self.intents[(intent.idea_id, intent.id)] = intent
+        self.intents_by_project[(intent.project_id, intent.id)] = intent
+        return intent
+
+    async def get_intent(self, idea_id: str, intent_id: str) -> Intent | None:
+        return self.intents.get((idea_id, intent_id))
+
+    async def list_intents(self, idea_id: str | None = None, project_id: str | None = None) -> list[Intent]:
+        intents = list(self.intents.values())
+        if idea_id:
+            intents = [intent for intent in intents if intent.idea_id == idea_id]
+        if project_id:
+            intents = [intent for intent in intents if intent.project_id == project_id]
+        return sorted(intents, key=lambda intent: intent.created_at, reverse=True)
+
     async def save_project_twin(self, project: ProjectTwin) -> ProjectTwin:
         project.updated_at = utcnow()
         self.project_twins[project.idea_id] = project
@@ -750,10 +897,28 @@ class InMemoryRepository(Repository):
         indexes = self.code_indexes.get(idea_id, [])
         return indexes[0] if indexes else None
 
+    async def save_research_artifact(self, artifact: ResearchArtifact) -> ResearchArtifact:
+        artifact.updated_at = utcnow()
+        self.research_artifacts[(artifact.factory_run_id, artifact.id)] = artifact
+        return artifact
+
+    async def get_research_artifact(self, factory_run_id: str, artifact_id: str) -> ResearchArtifact | None:
+        return self.research_artifacts.get((factory_run_id, artifact_id))
+
+    async def list_research_artifacts(self, factory_run_id: str, statuses: set[str] | None = None) -> list[ResearchArtifact]:
+        artifacts = [artifact for (run_id, _), artifact in self.research_artifacts.items() if run_id == factory_run_id]
+        if statuses:
+            artifacts = [artifact for artifact in artifacts if artifact.status in statuses]
+        return sorted(artifacts, key=lambda artifact: artifact.created_at)
+
     async def enqueue_work_item(self, item: WorkItem) -> WorkItem:
         if item.idempotency_key:
             for existing in self.work_items.values():
                 if existing.idempotency_key == item.idempotency_key and existing.status not in {"completed", "cancelled"}:
+                    return existing
+        if item.dedupe_hash:
+            for existing in self.work_items.values():
+                if existing.dedupe_hash == item.dedupe_hash and existing.status not in {"completed", "cancelled", "failed_terminal"}:
                     return existing
         self.work_items[item.id] = item
         await self._refresh_project_queue_count(item.project_id)
@@ -831,7 +996,7 @@ class InMemoryRepository(Repository):
         events = list(self.worker_events.values())
         if worker_id:
             events = [event for event in events if event.worker_id == worker_id]
-        return sorted(events, key=lambda item: item.created_at, reverse=True)
+        return sorted(events, key=lambda item: item.created_at)
 
     async def _refresh_project_queue_count(self, project_id: str) -> None:
         project = await self.get_project_twin_by_id(project_id)
@@ -932,12 +1097,14 @@ class InMemoryRepository(Repository):
     async def get_factory_run(self, run_id: str) -> FactoryRun | None:
         return self.factory_runs.get(run_id)
 
-    async def list_factory_runs(self, idea_id: str | None = None, template_id: str | None = None, statuses: set[str] | None = None) -> list[FactoryRun]:
+    async def list_factory_runs(self, idea_id: str | None = None, template_id: str | None = None, intent_id: str | None = None, statuses: set[str] | None = None) -> list[FactoryRun]:
         runs = list(self.factory_runs.values())
         if idea_id:
             runs = [r for r in runs if r.idea_id == idea_id]
         if template_id:
             runs = [r for r in runs if r.template_id == template_id]
+        if intent_id:
+            runs = [r for r in runs if r.intent_id == intent_id]
         if statuses:
             runs = [r for r in runs if r.status in statuses]
         return sorted(runs, key=lambda r: r.created_at, reverse=True)
@@ -1001,6 +1168,26 @@ class InMemoryRepository(Repository):
             [t for t in self.repair_tasks.values() if t.factory_batch_id == factory_batch_id],
             key=lambda t: t.created_at,
         )
+
+    async def save_review_packet(self, packet: ReviewPacket) -> ReviewPacket:
+        packet.updated_at = utcnow()
+        self.review_packets_by_run[packet.run_id] = packet
+        self.review_packets[packet.id] = packet
+        return packet
+
+    async def get_review_packet(self, run_id: str) -> ReviewPacket | None:
+        return self.review_packets_by_run.get(run_id)
+
+    async def get_review_packet_by_id(self, packet_id: str) -> ReviewPacket | None:
+        return self.review_packets.get(packet_id)
+
+    async def list_review_packets(self, wait_window_states: set[str] | None = None, statuses: set[str] | None = None) -> list[ReviewPacket]:
+        packets = list(self.review_packets.values())
+        if wait_window_states:
+            packets = [p for p in packets if p.wait_window_state in wait_window_states]
+        if statuses:
+            packets = [p for p in packets if p.status in statuses]
+        return sorted(packets, key=lambda p: p.created_at, reverse=True)
 
 
 class DynamoDBRepository(Repository):
@@ -1155,6 +1342,38 @@ class DynamoDBRepository(Repository):
         })
         return installation
 
+    async def save_intent(self, intent: Intent) -> Intent:
+        intent.updated_at = utcnow()
+        self._put({
+            "PK": f"IDEA#{intent.idea_id}",
+            "SK": f"INTENT#{intent.id}",
+            "entity": "Intent",
+            "GSI1PK": f"PROJECT#{intent.project_id}",
+            "GSI1SK": f"INTENT#{_iso(intent.created_at)}#{intent.id}",
+            **intent.__dict__,
+        })
+        self.intents[(intent.idea_id, intent.id)] = intent
+        self.intents_by_project[(intent.project_id, intent.id)] = intent
+        return intent
+
+    async def get_intent(self, idea_id: str, intent_id: str) -> Intent | None:
+        item = self.table.get_item(Key={"PK": f"IDEA#{idea_id}", "SK": f"INTENT#{intent_id}"}).get("Item")
+        return self._intent(_clean_from_dynamo(item)) if item else None
+
+    async def list_intents(self, idea_id: str | None = None, project_id: str | None = None) -> list[Intent]:
+        if idea_id:
+            raw = [self._intent(_clean_from_dynamo(item)) for item in self._query_pk(f"IDEA#{idea_id}", "INTENT#")]
+        elif project_id:
+            response = self.table.query(
+                IndexName="GSI1",
+                KeyConditionExpression=self._Key("GSI1PK").eq(f"PROJECT#{project_id}") & self._Key("GSI1SK").begins_with("INTENT#"),
+                ScanIndexForward=False,
+            )
+            raw = [self._intent(_clean_from_dynamo(item)) for item in response.get("Items", [])]
+        else:
+            raw = list(self.intents.values())
+        return sorted(raw, key=lambda intent: intent.created_at, reverse=True)
+
     async def list_github_installations(self) -> list[GitHubInstallation]:
         response = self.table.query(
             IndexName="GSI1",
@@ -1219,10 +1438,37 @@ class DynamoDBRepository(Repository):
             return None
         return self._code_index(sorted(items, key=lambda item: item["created_at"], reverse=True)[0])
 
+    async def save_research_artifact(self, artifact: ResearchArtifact) -> ResearchArtifact:
+        artifact.updated_at = utcnow()
+        self._put({
+            "PK": f"FACTORY_RUN#{artifact.factory_run_id}",
+            "SK": f"RESEARCH_ARTIFACT#{artifact.id}",
+            "entity": "ResearchArtifact",
+            "GSI1PK": "RESEARCH_ARTIFACTS",
+            "GSI1SK": f"{_iso(artifact.created_at)}#{artifact.factory_run_id}#{artifact.id}",
+            **asdict(artifact),
+        })
+        self.research_artifacts[(artifact.factory_run_id, artifact.id)] = artifact
+        return artifact
+
+    async def get_research_artifact(self, factory_run_id: str, artifact_id: str) -> ResearchArtifact | None:
+        item = self.table.get_item(Key={"PK": f"FACTORY_RUN#{factory_run_id}", "SK": f"RESEARCH_ARTIFACT#{artifact_id}"}).get("Item")
+        return self._research_artifact(_clean_from_dynamo(item)) if item else None
+
+    async def list_research_artifacts(self, factory_run_id: str, statuses: set[str] | None = None) -> list[ResearchArtifact]:
+        artifacts = [self._research_artifact(item) for item in self._query_pk(f"FACTORY_RUN#{factory_run_id}", "RESEARCH_ARTIFACT#")]
+        if statuses:
+            artifacts = [artifact for artifact in artifacts if artifact.status in statuses]
+        return sorted(artifacts, key=lambda artifact: artifact.created_at)
+
     async def enqueue_work_item(self, item: WorkItem) -> WorkItem:
         if item.idempotency_key:
             for existing in await self.list_work_items(statuses={"queued", "claimed", "running", "waiting_for_machine", "failed_retryable"}):
                 if existing.idempotency_key == item.idempotency_key:
+                    return existing
+        if item.dedupe_hash:
+            for existing in await self.list_work_items(statuses={"queued", "claimed", "running", "waiting_for_machine", "failed_retryable"}):
+                if existing.dedupe_hash == item.dedupe_hash:
                     return existing
         await self.save_work_item(item)
         return item
@@ -1380,7 +1626,7 @@ class DynamoDBRepository(Repository):
                 KeyConditionExpression=self._Key("GSI1PK").eq("WORKER_EVENTS"),
             )
             raw = [_clean_from_dynamo(item) for item in response.get("Items", [])]
-        return sorted([self._worker_event(item) for item in raw], key=lambda item: item.created_at, reverse=True)
+        return sorted([self._worker_event(item) for item in raw], key=lambda item: item.created_at)
 
     async def save_template_pack(self, pack: TemplatePack) -> TemplatePack:
         pack.updated_at = utcnow()
@@ -1537,7 +1783,7 @@ class DynamoDBRepository(Repository):
         item = self.table.get_item(Key={"PK": f"FACTORY_RUN#{run_id}", "SK": "METADATA"}).get("Item")
         return self._factory_run(_clean_from_dynamo(item)) if item else None
 
-    async def list_factory_runs(self, idea_id: str | None = None, template_id: str | None = None, statuses: set[str] | None = None) -> list[FactoryRun]:
+    async def list_factory_runs(self, idea_id: str | None = None, template_id: str | None = None, intent_id: str | None = None, statuses: set[str] | None = None) -> list[FactoryRun]:
         if idea_id:
             response = self.table.query(
                 IndexName="GSI1",
@@ -1559,6 +1805,8 @@ class DynamoDBRepository(Repository):
             )
             raw = [_clean_from_dynamo(item) for item in response.get("Items", []) if item.get("entity") == "FactoryRun"]
         runs = [self._factory_run(item) for item in raw]
+        if intent_id:
+            runs = [r for r in runs if r.intent_id == intent_id]
         if statuses:
             runs = [r for r in runs if r.status in statuses]
         return sorted(runs, key=lambda r: r.created_at, reverse=True)
@@ -1689,6 +1937,41 @@ class DynamoDBRepository(Repository):
             key=lambda t: t.created_at,
         )
 
+    async def save_review_packet(self, packet: ReviewPacket) -> ReviewPacket:
+        packet.updated_at = utcnow()
+        self._put({
+            "PK": f"FACTORY_RUN#{packet.run_id}",
+            "SK": "REVIEW_PACKET",
+            "entity": "ReviewPacket",
+            "GSI1PK": "REVIEW_PACKETS",
+            "GSI1SK": f"{packet.wait_window_state}#{_iso(packet.created_at)}#{packet.id}",
+            "GSI2PK": f"REVIEW_PACKET#{packet.id}",
+            "GSI2SK": "METADATA",
+            **packet.__dict__,
+        })
+        return packet
+
+    async def get_review_packet(self, run_id: str) -> ReviewPacket | None:
+        item = self.table.get_item(Key={"PK": f"FACTORY_RUN#{run_id}", "SK": "REVIEW_PACKET"}).get("Item")
+        return self._review_packet(_clean_from_dynamo(item)) if item else None
+
+    async def get_review_packet_by_id(self, packet_id: str) -> ReviewPacket | None:
+        item = self.table.get_item(Key={"PK": f"REVIEW_PACKET#{packet_id}", "SK": "METADATA"}).get("Item")
+        return self._review_packet(_clean_from_dynamo(item)) if item else None
+
+    async def list_review_packets(self, wait_window_states: set[str] | None = None, statuses: set[str] | None = None) -> list[ReviewPacket]:
+        response = self.table.query(
+            IndexName="GSI1",
+            KeyConditionExpression=self._Key("GSI1PK").eq("REVIEW_PACKETS"),
+            ScanIndexForward=False,
+        )
+        packets = [self._review_packet(_clean_from_dynamo(item)) for item in response.get("Items", [])]
+        if wait_window_states:
+            packets = [p for p in packets if p.wait_window_state in wait_window_states]
+        if statuses:
+            packets = [p for p in packets if p.status in statuses]
+        return sorted(packets, key=lambda p: p.created_at, reverse=True)
+
     def _idea(self, item: dict[str, Any]) -> Idea:
         return Idea(id=item["id"], title=item["title"], slug=item["slug"], description=item["description"], current_phase=item.get("current_phase", "capture"), status=item.get("status", "active"), source_type=item.get("source_type", "manual"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
 
@@ -1703,6 +1986,36 @@ class DynamoDBRepository(Repository):
 
     def _research(self, item: dict[str, Any]) -> ResearchTask:
         return ResearchTask(id=item["id"], idea_id=item["idea_id"], prompt_text=item["prompt_text"], status=item.get("status", "pending"), result_file_path=item.get("result_file_path"), result_content=item.get("result_content"), topic=item.get("topic"), created_at=_dt(item.get("created_at")) or utcnow(), completed_at=_dt(item.get("completed_at")))
+
+    def _artifact_metadata(self, item: dict[str, Any]) -> ArtifactMetadata:
+        return ArtifactMetadata(
+            source=item.get("source", "research"),
+            source_uri=item.get("source_uri"),
+            actor=item.get("actor"),
+            correlation_id=item.get("correlation_id"),
+            dedupe_hash=item.get("dedupe_hash"),
+            tags=item.get("tags") or [],
+            extra=item.get("extra") or {},
+            created_at=_dt(item.get("created_at")) or utcnow(),
+        )
+
+    def _intent(self, item: dict[str, Any]) -> Intent:
+        return Intent(
+            id=item["id"],
+            idea_id=item["idea_id"],
+            project_id=item["project_id"],
+            summary=item.get("summary", ""),
+            details=item.get("details") or {},
+            correlation_id=item.get("correlation_id"),
+            dedupe_hash=item.get("dedupe_hash"),
+            budget=item.get("budget") or {},
+            stop_conditions=item.get("stop_conditions") or [],
+            factory_run_ids=item.get("factory_run_ids") or [],
+            source=item.get("source", "manual"),
+            status=item.get("status", "active"),
+            created_at=_dt(item.get("created_at")) or utcnow(),
+            updated_at=_dt(item.get("updated_at")) or utcnow(),
+        )
 
     def _report(self, item: dict[str, Any]) -> Report:
         return Report(id=item["id"], idea_id=item["idea_id"], phase=item["phase"], title=item["title"], content=item.get("content", ""), content_path=item.get("content_path", ""), generated_at=_dt(item.get("generated_at")) or utcnow())
@@ -1719,8 +2032,25 @@ class DynamoDBRepository(Repository):
     def _code_index(self, item: dict[str, Any]) -> CodeIndexArtifact:
         return CodeIndexArtifact(id=item["id"], project_id=item["project_id"], idea_id=item["idea_id"], commit_sha=item["commit_sha"], file_inventory=item.get("file_inventory") or [], manifests=item.get("manifests") or [], dependency_graph=item.get("dependency_graph") or {}, route_map=item.get("route_map") or [], test_commands=item.get("test_commands") or [], architecture_summary=item.get("architecture_summary", ""), risks=item.get("risks") or [], todos=item.get("todos") or [], searchable_chunks=item.get("searchable_chunks") or [], created_at=_dt(item.get("created_at")) or utcnow())
 
+    def _research_artifact(self, item: dict[str, Any]) -> ResearchArtifact:
+        return ResearchArtifact(
+            id=item["id"],
+            factory_run_id=item["factory_run_id"],
+            title=item.get("title", ""),
+            source=item.get("source", ""),
+            raw_content=item.get("raw_content"),
+            raw_content_uri=item.get("raw_content_uri"),
+            raw_metadata=item.get("raw_metadata") or {},
+            normalized=item.get("normalized") or {},
+            artifact_metadata=self._artifact_metadata(item.get("artifact_metadata") or {}),
+            dedupe_hash=item.get("dedupe_hash", ""),
+            status=item.get("status", "active"),
+            created_at=_dt(item.get("created_at")) or utcnow(),
+            updated_at=_dt(item.get("updated_at")) or utcnow(),
+        )
+
     def _work_item(self, item: dict[str, Any]) -> WorkItem:
-        return WorkItem(id=item["id"], idea_id=item["idea_id"], project_id=item["project_id"], job_type=item["job_type"], payload=item.get("payload") or {}, status=item.get("status", "queued"), priority=int(item.get("priority", 50)), idempotency_key=item.get("idempotency_key"), worker_id=item.get("worker_id"), claim_token=item.get("claim_token"), claimed_at=_dt(item.get("claimed_at")), heartbeat_at=_dt(item.get("heartbeat_at")), run_after=_dt(item.get("run_after")), retry_count=int(item.get("retry_count", 0)), timeout_seconds=int(item.get("timeout_seconds", 900)), logs=item.get("logs", ""), logs_pointer=item.get("logs_pointer"), result=item.get("result"), error=item.get("error"), branch_name=item.get("branch_name"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
+        return WorkItem(id=item["id"], idea_id=item["idea_id"], project_id=item["project_id"], job_type=item["job_type"], payload=item.get("payload") or {}, status=item.get("status", "queued"), priority=int(item.get("priority", 50)), factory_run_id=item.get("factory_run_id"), parent_work_item_id=item.get("parent_work_item_id"), rationale=item.get("rationale"), correlation_id=item.get("correlation_id"), dedupe_hash=item.get("dedupe_hash"), budget=item.get("budget") or {}, stop_conditions=item.get("stop_conditions") or [], idempotency_key=item.get("idempotency_key"), worker_id=item.get("worker_id"), claim_token=item.get("claim_token"), claimed_at=_dt(item.get("claimed_at")), heartbeat_at=_dt(item.get("heartbeat_at")), run_after=_dt(item.get("run_after")), retry_count=int(item.get("retry_count", 0)), timeout_seconds=int(item.get("timeout_seconds", 900)), logs=item.get("logs", ""), logs_pointer=item.get("logs_pointer"), result=item.get("result"), error=item.get("error"), branch_name=item.get("branch_name"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
 
     def _agent_run(self, item: dict[str, Any]) -> AgentRun:
         return AgentRun(id=item["id"], work_item_id=item["work_item_id"], idea_id=item["idea_id"], project_id=item["project_id"], engine=item["engine"], agent_name=item.get("agent_name"), model=item.get("model"), status=item.get("status", "running"), prompt=item.get("prompt", ""), output=item.get("output", ""), started_at=_dt(item.get("started_at")) or utcnow(), completed_at=_dt(item.get("completed_at")))
@@ -1738,7 +2068,7 @@ class DynamoDBRepository(Repository):
         return WorkerCredentialLease(id=item["id"], worker_id=item["worker_id"], api_token_hash=item["api_token_hash"], access_key_id=item.get("access_key_id", ""), secret_access_key=item.get("secret_access_key", ""), session_token=item.get("session_token", ""), expires_at=_dt(item.get("expires_at")) or utcnow(), command_queue_url=item.get("command_queue_url", ""), event_queue_url=item.get("event_queue_url", ""), region=item.get("region", "us-east-1"), created_at=_dt(item.get("created_at")) or utcnow())
 
     def _worker_event(self, item: dict[str, Any]) -> WorkerEvent:
-        return WorkerEvent(id=item["id"], worker_id=item["worker_id"], event_type=item["event_type"], payload=item.get("payload") or {}, work_item_id=item.get("work_item_id"), status=item.get("status", "received"), created_at=_dt(item.get("created_at")) or utcnow())
+        return WorkerEvent(id=item["id"], worker_id=item["worker_id"], event_type=item["event_type"], payload=item.get("payload") or {}, work_item_id=item.get("work_item_id"), factory_run_id=item.get("factory_run_id"), research_artifact_id=item.get("research_artifact_id"), review_packet_id=item.get("review_packet_id"), correlation_id=item.get("correlation_id"), idempotency_key=item.get("idempotency_key"), actor=item.get("actor"), status=item.get("status", "received"), created_at=_dt(item.get("created_at")) or utcnow())
 
     def _template_pack(self, item: dict[str, Any]) -> TemplatePack:
         return TemplatePack(id=item["id"], template_id=item["template_id"], version=item.get("version", "0.0.1"), channel=item.get("channel", "stable"), display_name=item.get("display_name", ""), description=item.get("description", ""), phases=item.get("phases") or [], quality_gates=item.get("quality_gates") or [], default_stack=item.get("default_stack") or {}, constraints=item.get("constraints") or [], opencode_worker=item.get("opencode_worker") or {}, created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
@@ -1767,7 +2097,7 @@ class DynamoDBRepository(Repository):
         return TemplateUpdateProposal(id=item["id"], template_id=item["template_id"], proposed_by=item["proposed_by"], change_type=item["change_type"], description=item.get("description", ""), payload_uri=item.get("payload_uri"), status=item.get("status", "pending"), created_at=_dt(item.get("created_at")) or utcnow(), reviewed_at=_dt(item.get("reviewed_at")))
 
     def _factory_run(self, item: dict[str, Any]) -> FactoryRun:
-        return FactoryRun(id=item["id"], idea_id=item["idea_id"], template_id=item["template_id"], status=item.get("status", "queued"), config=item.get("config") or {}, tracking_manifest_uri=item.get("tracking_manifest_uri"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow(), completed_at=_dt(item.get("completed_at")))
+        return FactoryRun(id=item["id"], idea_id=item["idea_id"], template_id=item["template_id"], status=item.get("status", "queued"), config=item.get("config") or {}, intent_id=item.get("intent_id"), run_type=item.get("run_type", "standard"), correlation_id=item.get("correlation_id"), dedupe_hash=item.get("dedupe_hash"), budget=item.get("budget") or {}, stop_conditions=item.get("stop_conditions") or [], tracking_manifest_uri=item.get("tracking_manifest_uri"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow(), completed_at=_dt(item.get("completed_at")))
 
     def _factory_run_tracking_manifest(self, item: dict[str, Any]) -> FactoryRunTrackingManifest:
         return FactoryRunTrackingManifest(
@@ -1803,6 +2133,39 @@ class DynamoDBRepository(Repository):
 
     def _repair_task(self, item: dict[str, Any]) -> RepairTask:
         return RepairTask(id=item["id"], factory_run_id=item["factory_run_id"], factory_batch_id=item["factory_batch_id"], failure_classification=item.get("failure_classification", ""), status=item.get("status", "pending"), attempt_number=int(item.get("attempt_number", 1)), command_output=item.get("command_output", ""), recent_diff=item.get("recent_diff", ""), changed_files=item.get("changed_files") or [], acceptance_criteria=item.get("acceptance_criteria") or [], guardrails=item.get("guardrails") or [], issue_summary=item.get("issue_summary", ""), work_item_id=item.get("work_item_id"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow(), completed_at=_dt(item.get("completed_at")))
+
+    def _review_packet(self, item: dict[str, Any]) -> ReviewPacket:
+        return ReviewPacket(
+            id=item["id"],
+            run_id=item["run_id"],
+            promise=item.get("promise", ""),
+            packet_type=item.get("packet_type", "standard"),
+            status=item.get("status", "awaiting_review"),
+            wait_window_state=item.get("wait_window_state", "awaiting_review"),
+            branch_name=item.get("branch_name"),
+            worker_id=item.get("worker_id"),
+            worker_display_name=item.get("worker_display_name"),
+            worker_machine_name=item.get("worker_machine_name"),
+            autonomy_level=item.get("autonomy_level"),
+            template_id=item.get("template_id"),
+            template_version=item.get("template_version"),
+            blast_radius=item.get("blast_radius") or {},
+            safety_net_results=item.get("safety_net_results") or {},
+            execution_trace=item.get("execution_trace") or {},
+            changed_files=item.get("changed_files") or [],
+            diff_summary_uri=item.get("diff_summary_uri"),
+            evaluator_verdict=item.get("evaluator_verdict") or {},
+            decision_gates=item.get("decision_gates") or {},
+            allowed_actions=item.get("allowed_actions") or [],
+            research_artifact_ids=item.get("research_artifact_ids") or [],
+            research_handoff=item.get("research_handoff") or {},
+            telemetry_events=item.get("telemetry_events") or [],
+            created_at=_dt(item.get("created_at")) or utcnow(),
+            wait_window_started_at=_dt(item.get("wait_window_started_at")),
+            expires_at=_dt(item.get("expires_at")),
+            resolved_at=_dt(item.get("resolved_at")),
+            updated_at=_dt(item.get("updated_at")) or utcnow(),
+        )
 
 
 _repo: Repository | None = None

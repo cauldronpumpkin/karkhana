@@ -5,16 +5,16 @@ Parameters:
   StageName:
     Type: String
     Default: "$default"
-  ZaiApiKey:
+  CodexLbApiKey:
     Type: String
     Default: ""
     NoEcho: true
-  ZaiApiBaseUrl:
+  CodexLbApiBaseUrl:
     Type: String
-    Default: "https://api.z.ai/api/coding/paas/v4"
-  ZaiModel:
+    Default: "http://127.0.0.1:2455/v1"
+  CodexLbModel:
     Type: String
-    Default: "glm-5.1"
+    Default: "gpt-5.5"
   GitHubAppId:
     Type: String
     Default: ""
@@ -225,9 +225,11 @@ Resources:
         Variables:
           IDEAREFINERY_STORAGE: dynamodb
           DYNAMODB_TABLE_NAME: !Ref IdeaRefineryTable
-          ZAI_API_KEY: !Ref ZaiApiKey
-          ZAI_API_BASE_URL: !Ref ZaiApiBaseUrl
-          ZAI_MODEL: !Ref ZaiModel
+          AI_PROVIDER: codex-lb
+          AI_MODEL: !Ref CodexLbModel
+          CODEX_LB_API_KEY: !Ref CodexLbApiKey
+          CODEX_LB_API_BASE_URL: !Ref CodexLbApiBaseUrl
+          CODEX_LB_MODEL: !Ref CodexLbModel
           GITHUB_APP_ID: !Ref GitHubAppId
           GITHUB_APP_PRIVATE_KEY: !Ref GitHubAppPrivateKey
           GITHUB_WEBHOOK_SECRET: !Ref GitHubWebhookSecret

@@ -157,6 +157,14 @@ class ProjectTwinService:
         payload: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
         priority: int = 50,
+        factory_run_id: str | None = None,
+        parent_work_item_id: str | None = None,
+        rationale: str | None = None,
+        correlation_id: str | None = None,
+        dedupe_hash: str | None = None,
+        budget: dict[str, Any] | None = None,
+        stop_conditions: list[str] | None = None,
+        branch_name: str | None = None,
     ) -> WorkItem:
         item = await get_repository().enqueue_work_item(
             WorkItem(
@@ -167,6 +175,14 @@ class ProjectTwinService:
                 idempotency_key=idempotency_key,
                 priority=priority,
                 timeout_seconds=settings.worker_claim_timeout_seconds,
+                factory_run_id=factory_run_id,
+                parent_work_item_id=parent_work_item_id,
+                rationale=rationale,
+                correlation_id=correlation_id,
+                dedupe_hash=dedupe_hash,
+                budget=dict(budget or {}),
+                stop_conditions=list(stop_conditions or []),
+                branch_name=branch_name,
             )
         )
         project = await get_repository().get_project_twin_by_id(project_id)

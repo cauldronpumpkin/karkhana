@@ -129,10 +129,10 @@ class LLMService:
 
     def _normalize_provider(self, provider: str) -> str:
         provider_id = (provider or "").strip().lower()
-        if provider_id in {"opencode", "opencode-go", "opencode_go"}:
-            provider_id = "opencodego"
+        if provider_id in {"opencode", "codex_lb", "codex-lb"}:
+            provider_id = "codex-lb"
         if provider_id not in self._providers:
-            provider_id = "zai" if "zai" in self._providers else next(iter(self._providers))
+            provider_id = "codex-lb" if "codex-lb" in self._providers else next(iter(self._providers))
         return provider_id
 
     def _default_model_for(self, provider: str) -> str:
@@ -142,64 +142,39 @@ class LLMService:
         return config.default_model
 
     def _load_providers(self) -> dict[str, ProviderConfig]:
-        agent_models = self._load_claude_agent_models()
-        opencodego = self._provider_from_agent_models(
-            provider_id="opencodego",
-            name="OpenCode Go",
-            agent_models=agent_models,
-            fallback_base_url=settings.opencodego_api_base_url,
-            fallback_api_key=settings.opencodego_api_key,
-            fallback_model=settings.opencodego_model,
-            expected_base_url="opencode.ai/zen/go",
-        )
-        zai = self._provider_from_agent_models(
-            provider_id="zai",
-            name="Z.ai Coding Plan",
-            agent_models=agent_models,
-            fallback_base_url=settings.zai_api_base_url,
-            fallback_api_key=settings.zai_api_key,
-            fallback_model=settings.zai_model,
-            expected_base_url="api.z.ai",
-        )
-        return {opencodego.id: opencodego, zai.id: zai}
-
-    def _provider_from_agent_models(
-        self,
-        provider_id: str,
-        name: str,
-        agent_models: dict[str, dict[str, Any]],
-        fallback_base_url: str,
-        fallback_api_key: str,
-        fallback_model: str,
-        expected_base_url: str,
-    ) -> ProviderConfig:
-        matches: list[tuple[str, dict[str, Any]]] = []
-        for model_id, config in agent_models.items():
-            base_url = str(config.get("base_url") or "")
-            if expected_base_url in base_url:
-                matches.append((model_id, config))
-
-        first_config = matches[0][1] if matches else {}
-        configured_models = tuple(model_id for model_id, _ in matches)
-        return ProviderConfig(
-            id=provider_id,
-            name=name,
-            base_url=str(first_config.get("base_url") or fallback_base_url),
-            api_key=str(first_config.get("api_key") or fallback_api_key),
-            default_model=fallback_model if fallback_model in configured_models or not configured_models else configured_models[0],
-            configured_models=configured_models or (fallback_model,),
+        opencode_config = self._load_opencode_config()
+        provider_config = opencode_config.get("provider", {}).get("codex-lb", {})
+        provider_options = provider_config.get("options", {}) if isinstance(provider_config, dict) else {}
+        provider_models = provider_config.get("models", {}) if isinstance(provider_config, dict) else {}
+        configured_models = tuple(
+            dict.fromkeys(
+                (
+                    settings.codex_lb_model,
+                    *(provider_models.keys() if isinstance(provider_models, dict) else ()),
+                )
+            )
         )
 
-    def _load_claude_agent_models(self) -> dict[str, dict[str, Any]]:
-        path = Path(settings.claude_settings_path).expanduser()
+        codex_lb = ProviderConfig(
+            id="codex-lb",
+            name="Codex LB",
+            base_url=str(provider_options.get("baseURL") or settings.codex_lb_api_base_url),
+            api_key=str(settings.codex_lb_api_key or provider_options.get("apiKey") or ""),
+            default_model=settings.codex_lb_model,
+            configured_models=configured_models or (settings.codex_lb_model,),
+        )
+        return {codex_lb.id: codex_lb}
+
+    def _load_opencode_config(self) -> dict[str, Any]:
+        config_path = settings.opencode_config_path or str(Path.home() / ".config" / "opencode" / "opencode.json")
+        path = Path(config_path).expanduser()
         if not path.exists():
             return {}
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return {}
-        agent_models = payload.get("agentModels", {})
-        return agent_models if isinstance(agent_models, dict) else {}
+        return payload if isinstance(payload, dict) else {}
 
     async def _discover_models(self, provider: ProviderConfig) -> list[str]:
         url = f"{provider.base_url.rstrip('/')}/models"
@@ -230,7 +205,7 @@ class LLMService:
                 models.append(str(model_id))
         return models
 
-    def _missing_key_response(self, provider: str = "zai") -> str:
+    def _missing_key_response(self, provider: str = "codex-lb") -> str:
         return (
             f"LLM provider '{provider}' is not configured yet. Set the provider API key "
             "on the backend environment to enable live AI responses."

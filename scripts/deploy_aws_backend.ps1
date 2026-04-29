@@ -38,13 +38,13 @@ if (Test-Path $ZipPath) {
 }
 Compress-Archive -Path (Join-Path $PackageDir "*") -DestinationPath $ZipPath -Force
 
-$zaiApiKey = ""
-if ($env:ZAI_API_KEY) {
-  $zaiApiKey = $env:ZAI_API_KEY
+$codexLbApiKey = ""
+if ($env:CODEX_LB_API_KEY) {
+  $codexLbApiKey = $env:CODEX_LB_API_KEY
 } elseif (Test-Path (Join-Path $Root ".env")) {
-  $envLine = Get-Content (Join-Path $Root ".env") | Where-Object { $_ -match "^ZAI_API_KEY=" } | Select-Object -First 1
+  $envLine = Get-Content (Join-Path $Root ".env") | Where-Object { $_ -match "^CODEX_LB_API_KEY=" } | Select-Object -First 1
   if ($envLine) {
-    $zaiApiKey = ($envLine -replace "^ZAI_API_KEY=", "").Trim('"').Trim("'")
+    $codexLbApiKey = ($envLine -replace "^CODEX_LB_API_KEY=", "").Trim('"').Trim("'")
   }
 }
 
@@ -53,7 +53,7 @@ aws cloudformation deploy `
   --stack-name $StackName `
   --template-file $TemplatePath `
   --capabilities CAPABILITY_NAMED_IAM `
-  --parameter-overrides ZaiApiKey="$zaiApiKey"
+  --parameter-overrides CodexLbApiKey="$codexLbApiKey"
 
 aws lambda update-function-code `
   --region $Region `

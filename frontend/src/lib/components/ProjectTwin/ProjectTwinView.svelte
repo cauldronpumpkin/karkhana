@@ -13,6 +13,8 @@
   let isReindexing = $state(false);
   let showCreateRun = $state(false);
   let createAutonomy = $state('autonomous_development');
+  let createIntentSummary = $state('');
+  let createIntentDetails = $state('');
   let isCreatingRun = $state(false);
   let error = $state('');
   let selectedRunId = $state('');
@@ -85,8 +87,16 @@
       await apiPost(`/api/projects/${project.id}/factory-runs`, {
         template_id: 'default',
         autonomy_level: createAutonomy,
+        intent: createIntentSummary.trim()
+          ? {
+              summary: createIntentSummary.trim(),
+              details: createIntentDetails.trim() ? { notes: createIntentDetails.trim() } : {},
+            }
+          : null,
       });
       showCreateRun = false;
+      createIntentSummary = '';
+      createIntentDetails = '';
       await loadProject();
     } catch (err) {
       error = err.message || 'Unable to create factory run.';

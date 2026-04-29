@@ -145,9 +145,13 @@ async def test_factory_run_service_valid_blueprint_includes_policy_payload() -> 
 
     assert result["factory_run"]["config"]["project_blueprint"]["blueprint_id"] == "bp-valid-001"
     assert result["factory_run"]["config"]["policy_result"]["status"] == "pass"
+    assert result["factory_run"]["config"]["template_manifest"]["id"] == "fullstack-saas-v1"
+    assert "graphify update ." in result["factory_run"]["config"]["verification_commands"]
+    assert "resolved_agents_hierarchy" in result["factory_run"]["config"]
     assert result["work_item"]["payload"]["project_blueprint"]["blueprint_id"] == "bp-valid-001"
     assert result["work_item"]["payload"]["permission_profile"]["ring"] == RING_1_SCOPED_EXECUTION
     assert result["work_item"]["payload"]["policy_result"]["status"] == "pass"
+    assert result["work_item"]["payload"]["template_manifest"]["id"] == "fullstack-saas-v1"
 
 
 @pytest.mark.asyncio
@@ -164,6 +168,7 @@ async def test_factory_run_service_warning_persists_planner_feedback() -> None:
 
     assert result["factory_run"]["config"]["policy_result"]["status"] == "warn"
     assert result["factory_run"]["config"]["planner_feedback"]
+    assert result["factory_run"]["config"]["template_manifest"]["id"] == "fullstack-saas-v1"
     assert result["work_item"]["payload"]["policy_result"]["status"] == "warn"
 
 

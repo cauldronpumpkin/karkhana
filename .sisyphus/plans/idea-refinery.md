@@ -2,14 +2,14 @@
 
 ## TL;DR
 
-> **Quick Summary**: Build a localhost-first web application (FastAPI + Svelte + SQLite) that enables collaborative AI-human idea refinement. Users chat with an AI agent (ZAI/GLM 5.1) that asks questions, does research, delegates Gemini Deep Research tasks, scores ideas, and generates step-by-step Prometheus prompts when ideas are ready to build.
+> **Quick Summary**: Build a localhost-first web application (FastAPI + Svelte + SQLite) that enables collaborative AI-human idea refinement. Users chat with an AI agent through codex-lb/OpenCode, asks questions, does research, delegates Gemini Deep Research tasks, scores ideas, and generates step-by-step Prometheus prompts when ideas are ready to build.
 > 
 > **Deliverables**:
 > - FastAPI backend with REST API + WebSocket chat
 > - Svelte frontend (Vite-built, served by FastAPI)
 > - SQLite database + per-idea folder structure
-> - LLM integration (ZAI GLM 5.1, OpenAI-compatible)
-> - Web search (ZAI MCP → DuckDuckGo fallback)
+> - LLM integration (codex-lb/OpenCode, OpenAI-compatible)
+> - Web search (OpenAI-compatible tools → DuckDuckGo fallback)
 > - Per-idea chat sessions with AI-driven phase progression
 > - Gemini Deep Research prompt generation + result upload
 > - 7-dimension numeric scoring system
@@ -40,8 +40,8 @@ User wanted a collaborative pipeline where AI and human collaborate to refine id
 - **Project memory**: Both global + per-idea tracking
 
 **Research Findings**:
-- ZAI API is OpenAI-compatible at `https://api.z.ai/api/coding/paas/v4`
-- ZAI coding plan includes Web Search MCP and Web Reader MCP capabilities
+- codex-lb is OpenAI-compatible at `http://127.0.0.1:2455/v1`
+- codex-lb/OpenCode is the configured model path for local development
 - Svelte with Vite builds to static files servable by FastAPI
 - Oh My OpenCode graphify skill provided pattern reference (multi-step pipeline, file-based state)
 
@@ -224,7 +224,7 @@ Max Concurrent: 7 (Wave 2)
   **What to do**:
   - Create project directory structure: `backend/`, `frontend/`, `data/`, `data/ideas/`
   - Initialize Python project with `pyproject.toml` (FastAPI, uvicorn, openai, python-dotenv, httpx, sqlalchemy, aiosqlite)
-  - Create `.env.example` with `ZAI_API_KEY=`, `ZAI_API_BASE_URL=https://api.z.ai/api/coding/paas/v4`, `ZAI_MODEL=glm-5.1`
+  - Create `.env.example` with `CODEX_LB_API_KEY=`, `CODEX_LB_API_BASE_URL=http://127.0.0.1:2455/v1`, `CODEX_LB_MODEL=gpt-5.5`
   - Create FastAPI app skeleton in `backend/app/main.py` with CORS middleware (localhost:5173 for dev, localhost:8000 for prod)
   - Create `backend/app/config.py` that loads settings from `.env` using pydantic-settings
   - Create `requirements.txt` or use pyproject.toml deps
@@ -249,13 +249,13 @@ Max Concurrent: 7 (Wave 2)
 
   **References**:
   - FastAPI project structure: standard `backend/app/main.py` pattern
-  - ZAI API config: `https://api.z.ai/api/coding/paas/v4` (coding API, NOT general API)
+  - codex-lb API config: `http://127.0.0.1:2455/v1`
   - Vite Svelte template: `npm create vite@latest frontend -- --template svelte`
 
   **Acceptance Criteria**:
   - [ ] `backend/app/main.py` exists and starts with `uvicorn backend.app.main:app`
   - [ ] `frontend/` contains a working Svelte project (npm install + npm run build succeeds)
-  - [ ] `.env.example` exists with ZAI_API_KEY, ZAI_API_BASE_URL, ZAI_MODEL
+  - [ ] `.env.example` exists with CODEX_LB_API_KEY, CODEX_LB_API_BASE_URL, CODEX_LB_MODEL
   - [ ] `.gitignore` covers node_modules, __pycache__, data/*.db, .env, frontend/dist/
 
   **QA Scenarios**:
@@ -263,7 +263,7 @@ Max Concurrent: 7 (Wave 2)
   ```
   Scenario: Backend starts successfully
     Tool: Bash
-    Preconditions: .env file exists with ZAI_API_KEY
+    Preconditions: .env file exists with CODEX_LB_API_KEY when proxy auth is enabled
     Steps:
       1. Run: uvicorn backend.app.main:app --port 8000 (start in background)
       2. Run: curl http://localhost:8000/api/health
@@ -445,8 +445,8 @@ Max Concurrent: 7 (Wave 2)
   **What to do**:
   - Create `backend/app/services/llm.py` with `LLMService` class
   - Use the `openai` Python package (OpenAI-compatible)
-  - Initialize with `base_url=https://api.z.ai/api/coding/paas/v4` and `api_key` from `.env`
-  - Model: `glm-5.1` (configurable via env)
+  - Initialize with `base_url=http://127.0.0.1:2455/v1` and API key from `.env` or OpenCode config
+  - Model: `gpt-5.5` (configurable via env)
   - Implement methods:
     - `async chat_completion(messages: list[dict], stream: bool = True) -> AsyncGenerator[str, None]` — streaming chat
     - `async chat_completion_sync(messages: list[dict]) -> str` — non-streaming for quick tasks
@@ -475,7 +475,7 @@ Max Concurrent: 7 (Wave 2)
 
   **References**:
   - OpenAI Python client: `pip install openai` — use `OpenAI(base_url=..., api_key=...)`
-  - ZAI API endpoint: `https://api.z.ai/api/coding/paas/v4` (coding plan specific)
+  - codex-lb API endpoint: `http://127.0.0.1:2455/v1`
   - Streaming: `client.chat.completions.create(..., stream=True)` returns async iterator of chunks
   - System prompt should know: idea context, current phase, research findings, scores, relationships
 
@@ -491,7 +491,7 @@ Max Concurrent: 7 (Wave 2)
   ```
   Scenario: LLM service returns streaming response
     Tool: Bash (curl + Python)
-    Preconditions: .env with valid ZAI_API_KEY
+    Preconditions: .env or OpenCode config with valid codex-lb credentials
     Steps:
       1. Run Python script: create LLMService, call chat_completion with [{"role": "user", "content": "Hello"}]
       2. Collect all chunks and verify non-empty response
@@ -513,7 +513,7 @@ Max Concurrent: 7 (Wave 2)
   ```
 
   **Commit**: YES
-  - Message: `feat(llm): OpenAI-compatible LLM client for ZAI GLM 5.1`
+  - Message: `feat(llm): OpenAI-compatible LLM client for codex-lb`
   - Files: `backend/app/services/llm.py`, `backend/app/services/system_prompts.py`, `backend/app/services/__init__.py`
 
 - [x] 5. File Structure + Idea Folder Management
@@ -821,7 +821,7 @@ Max Concurrent: 7 (Wave 2)
   - **Blocked By**: Task 4
 
   **References**:
-  - ZAI API web search: Check if `https://api.z.ai/api/coding/paas/v4` supports function calling or has a web search endpoint
+  - codex-lb API web search: Check if the configured codex-lb route supports function calling or has a web search endpoint
   - `duckduckgo-search` package: `https://pypi.org/project/duckduckgo-search/`
   - `html2text` package: `https://pypi.org/project/html2text/`
   - Rate limiting: Simple token bucket in-memory
@@ -2000,7 +2000,7 @@ Max Concurrent: 7 (Wave 2)
 - **Wave 1**: `feat(scaffold): project scaffolding with FastAPI + Svelte + SQLite config`
 - **Wave 1**: `feat(db): SQLite models for ideas, phases, scores, messages, relationships`
 - **Wave 1**: `feat(ui): Svelte project setup with design system and base layout`
-- **Wave 1**: `feat(llm): OpenAI-compatible LLM client for ZAI GLM 5.1`
+- **Wave 1**: `feat(llm): OpenAI-compatible LLM client for codex-lb`
 - **Wave 1**: `feat(storage): idea folder structure and file management service`
 - **Wave 2**: `feat(chat): WebSocket chat API with LLM streaming`
 - **Wave 2**: `feat(phases): 8-phase state machine with AI-driven progression`

@@ -6,14 +6,17 @@
     ChevronDown,
     ChevronRight,
     Clock,
+    FileText,
     Loader2,
     Play,
     RefreshCw,
     ShieldCheck,
+    Sparkles,
+    Upload,
     Wrench,
     XCircle
   } from 'lucide-svelte';
-  import { getFactoryRun } from '../../api.js';
+  import { createResearchArtifact, createResearchHandoff, getFactoryRun } from '../../api.js';
   import Badge from '../UI/Badge.svelte';
   import Button from '../UI/Button.svelte';
   import PromptInspector from './PromptInspector.svelte';
@@ -25,6 +28,14 @@
   let error = $state('');
   let expandedPhases = $state({});
   let showPromptFor = $state(null);
+  let isImportingResearch = $state(false);
+  let isGeneratingHandoff = $state(false);
+  let researchTitle = $state('');
+  let researchSource = $state('');
+  let researchRawContent = $state('');
+  let researchRawMetadataText = $state('{}');
+  let researchNormalizedText = $state('');
+  let researchError = $state('');
 
   let factoryRun = $derived(bundle?.factory_run || null);
   let phases = $derived(bundle?.phases || []);
@@ -32,6 +43,10 @@
   let verifications = $derived(bundle?.verifications || []);
   let trackingSummary = $derived(bundle?.tracking_summary || {});
   let trackingManifest = $derived(bundle?.tracking_manifest || {});
+  let factoryState = $derived(bundle?.factory_state || {});
+  let intent = $derived(bundle?.intent || null);
+  let researchArtifacts = $derived(bundle?.research_artifacts || []);
+  let researchArtifactCount = $derived(bundle?.research_artifact_count || researchArtifacts.length || 0);
 
   let phaseProgress = $derived(trackingSummary.phase_progress || {});
   let batchProgress = $derived(trackingSummary.batch_progress || {});
@@ -101,8 +116,57 @@
     showPromptFor = showPromptFor === batch.id ? null : batch.id;
   }
 
+  function parseJsonInput(text, fallback = {}) {
+    const value = (text || '').trim();
+    if (!value) return fallback;
+    return JSON.parse(value);
+  }
+
+  async function importResearchArtifact() {
+    if (!factoryRunId || !researchTitle.trim() || !researchSource.trim()) return;
+    isImportingResearch = true;
+    researchError = '';
+    try {
+      await createResearchArtifact(factoryRunId, {
+        title: researchTitle.trim(),
+        source: researchSource.trim(),
+        raw_content: researchRawContent || null,
+        raw_metadata: parseJsonInput(researchRawMetadataText, {}),
+        normalized: researchNormalizedText.trim() ? parseJsonInput(researchNormalizedText, {}) : null,
+      });
+      researchTitle = '';
+      researchSource = '';
+      researchRawContent = '';
+      researchRawMetadataText = '{}';
+      researchNormalizedText = '';
+      await loadRun();
+    } catch (err) {
+      researchError = err.message || 'Failed to import research artifact.';
+    } finally {
+      isImportingResearch = false;
+    }
+  }
+
+  async function generateHandoff() {
+    if (!factoryRunId) return;
+    isGeneratingHandoff = true;
+    researchError = '';
+    try {
+      await createResearchHandoff(factoryRunId);
+      await loadRun();
+    } catch (err) {
+      researchError = err.message || 'Failed to generate research handoff.';
+    } finally {
+      isGeneratingHandoff = false;
+    }
+  }
+
   function fmtDate(v) {
     return v ? new Date(v).toLocaleString() : 'n/a';
+  }
+
+  function shortId(value) {
+    return value ? value.slice(0, 12) : 'n/a';
   }
 
   onMount(loadRun);
@@ -156,6 +220,96 @@
         <ShieldCheck size={16} />
       </section>
     {/if}
+
+    <section class="factory-state">
+      <div class="factory-state-summary">
+        <div class="state-head">
+          <div>
+            <p class="section-label">Factory State</p>
+            <h2>Intent and research</h2>
+          </div>
+          <Badge variant={factoryState.handoff_status === 'approved' ? 'success' : factoryState.handoff_status === 'awaiting_review' ? 'warning' : 'muted'}>
+            {factoryState.handoff_status || 'not created'}
+          </Badge>
+        </div>
+        <div class="state-grid">
+          <article>
+            <span>Intent</span>
+            <strong>{intent?.summary || factoryState.intent_summary || 'No intent captured'}</strong>
+            <small>{intent?.id ? `Intent ${shortId(intent.id)}` : 'Use the project run dialog to capture a goal.'}</small>
+          </article>
+          <article>
+            <span>Correlation</span>
+            <strong class="mono">{factoryState.correlation_id || factoryRun?.correlation_id || 'n/a'}</strong>
+            <small>Shared event correlation id</small>
+          </article>
+          <article>
+            <span>Budget</span>
+            <strong>{Object.keys(factoryState.budget || {}).length || 0}</strong>
+            <small>{Object.keys(factoryState.budget || {}).length ? 'Budget controls set' : 'No explicit budget'}</small>
+          </article>
+          <article>
+            <span>Stop conditions</span>
+            <strong>{(factoryState.stop_conditions || []).length}</strong>
+            <small>{(factoryState.stop_conditions || []).length ? 'Active stop rules' : 'No stop rules yet'}</small>
+          </article>
+          <article>
+            <span>Research artifacts</span>
+            <strong>{researchArtifactCount}</strong>
+            <small>Imported into this run</small>
+          </article>
+        </div>
+        <div class="state-tags">
+          {#if Object.entries(factoryState.budget || {}).length}
+            {#each Object.entries(factoryState.budget || {}) as [key, value]}
+              <Badge variant="accent">{key}: {String(value)}</Badge>
+            {/each}
+          {/if}
+          {#each factoryState.stop_conditions || [] as stop}
+            <Badge variant="muted">{stop}</Badge>
+          {/each}
+          {#if !Object.entries(factoryState.budget || {}).length && !(factoryState.stop_conditions || []).length}
+            <span class="empty-inline">No budget or stop conditions have been captured yet.</span>
+          {/if}
+        </div>
+      </div>
+
+      <div class="research-form">
+        <h3><FileText size={15} /> Import research</h3>
+        {#if researchError}
+          <p class="inline-error">{researchError}</p>
+        {/if}
+        <div class="form-grid">
+          <input bind:value={researchTitle} placeholder="Title" />
+          <input bind:value={researchSource} placeholder="Source" />
+        </div>
+        <textarea bind:value={researchRawContent} rows="4" placeholder="Raw content"></textarea>
+        <div class="form-grid stacked">
+          <textarea bind:value={researchRawMetadataText} rows="3" placeholder='Raw metadata JSON (optional)'></textarea>
+          <textarea bind:value={researchNormalizedText} rows="3" placeholder='Normalized JSON (optional)'></textarea>
+        </div>
+        <div class="form-actions">
+          <Button size="sm" variant="secondary" onclick={importResearchArtifact} disabled={isImportingResearch || !researchTitle.trim() || !researchSource.trim()}>
+            {#if isImportingResearch}
+              <span class="spin"><Loader2 size={14} /></span>
+              Importing
+            {:else}
+              <Upload size={14} />
+              Import
+            {/if}
+          </Button>
+          <Button size="sm" onclick={generateHandoff} disabled={isGeneratingHandoff}>
+            {#if isGeneratingHandoff}
+              <span class="spin"><Loader2 size={14} /></span>
+              Generating
+            {:else}
+              <Sparkles size={14} />
+              Generate handoff
+            {/if}
+          </Button>
+        </div>
+      </div>
+    </section>
 
     <section class="metrics-strip">
       <article>
@@ -432,6 +586,141 @@
     padding: var(--spacing-sm) var(--spacing-md);
   }
 
+  .factory-state {
+    display: grid;
+    gap: var(--spacing-md);
+    grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+    margin-bottom: var(--spacing-lg);
+  }
+
+  .factory-state-summary,
+  .research-form {
+    background: rgba(5, 10, 15, 0.58);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-md);
+    padding: var(--spacing-md);
+  }
+
+  .state-head {
+    align-items: flex-start;
+    display: flex;
+    gap: var(--spacing-sm);
+    justify-content: space-between;
+    margin-bottom: var(--spacing-md);
+  }
+
+  .section-label {
+    color: var(--color-text-secondary);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    margin: 0 0 4px;
+    text-transform: uppercase;
+  }
+
+  .state-head h2 {
+    color: var(--color-text);
+    font-size: 1.05rem;
+    margin: 0;
+  }
+
+  .state-grid {
+    display: grid;
+    gap: var(--spacing-sm);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-bottom: var(--spacing-sm);
+  }
+
+  .state-grid article {
+    background: rgba(4, 9, 14, 0.7);
+    border: 1px solid rgba(103, 128, 151, 0.16);
+    border-radius: var(--border-radius-sm);
+    padding: var(--spacing-sm);
+  }
+
+  .state-grid span {
+    color: var(--color-text-secondary);
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    margin-bottom: 2px;
+    text-transform: uppercase;
+  }
+
+  .state-grid strong {
+    color: var(--color-text);
+    display: block;
+    font-size: 0.9rem;
+    line-height: 1.2;
+    margin-bottom: 4px;
+    word-break: break-word;
+  }
+
+  .state-grid small {
+    color: var(--color-text-secondary);
+    display: block;
+    font-size: 0.72rem;
+  }
+
+  .state-tags {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .empty-inline {
+    color: var(--color-text-secondary);
+    font-size: 0.78rem;
+  }
+
+  .research-form h3 {
+    align-items: center;
+    color: var(--color-text);
+    display: inline-flex;
+    gap: 6px;
+    margin: 0 0 var(--spacing-sm);
+  }
+
+  .research-form input,
+  .research-form textarea {
+    background: rgba(4, 9, 14, 0.7);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-sm);
+    color: var(--color-text);
+    font: inherit;
+    padding: 8px 10px;
+    resize: vertical;
+    width: 100%;
+  }
+
+  .research-form textarea {
+    margin-bottom: 8px;
+  }
+
+  .form-grid {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-bottom: 8px;
+  }
+
+  .form-grid.stacked {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .form-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+
+  .inline-error {
+    color: var(--color-error);
+    font-size: 0.78rem;
+    margin: 0 0 8px;
+  }
+
   .metrics-strip {
     display: grid;
     gap: var(--spacing-md);
@@ -499,6 +788,10 @@
   .work-queued strong { color: var(--color-text-secondary); }
   .work-running strong { color: var(--color-warning); }
   .work-completed strong { color: var(--color-success); }
+
+  .mono {
+    font-family: var(--font-mono);
+  }
 
   .phases-section h2 {
     color: var(--color-text);
@@ -691,12 +984,29 @@
       flex-direction: column;
     }
 
+    .factory-state {
+      grid-template-columns: 1fr;
+    }
+
+    .state-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
     .metrics-strip {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
 
   @media (max-width: 640px) {
+    .state-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .form-grid,
+    .form-grid.stacked {
+      grid-template-columns: 1fr;
+    }
+
     .metrics-strip {
       grid-template-columns: 1fr 1fr;
     }

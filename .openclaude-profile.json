@@ -1,9 +1,9 @@
 {
   "profile": "openai",
   "env": {
-    "OPENAI_BASE_URL": "https://api.z.ai/api/coding/paas/v4",
-    "OPENAI_MODEL": "opus",
-    "OPENAI_API_KEY": "97d59d8aa6f348e999c54fb31ac9a00a.GPziyCfBSaqUS09e"
+    "OPENAI_BASE_URL": "http://127.0.0.1:2455/v1",
+    "OPENAI_MODEL": "gpt-5.5",
+    "OPENAI_API_KEY": "${CODEX_LB_API_KEY}"
   },
   "createdAt": "2026-04-26T03:48:13.849Z"
 }

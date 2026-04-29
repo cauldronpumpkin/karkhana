@@ -1,16 +1,22 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from backend.app.repository import (
     AUTONOMY_AUTONOMOUS_DEVELOPMENT,
+    ArtifactMetadata,
     FactoryBatch,
     FactoryPhase,
     FactoryRun,
+    Intent,
     ProjectTwin,
+    ResearchArtifact,
     TemplateArtifact,
     TemplatePack,
     WorkItem,
+    WorkerEvent,
     get_repository,
     utcnow,
 )
@@ -26,6 +32,7 @@ from backend.app.services.factory_tracking import (
     collect_factory_run_bundle,
     refresh_factory_run_tracking_manifest,
 )
+from backend.app.services.template_pack import TemplatePackService
 from backend.app.services.policy_engine import (
     KNOWN_WORKER_CAPABILITIES,
     PolicyBlockedError,
@@ -44,6 +51,7 @@ class FactoryRunService:
     def __init__(self) -> None:
         self._project_service = ProjectTwinService()
         self._policy_engine = PythonPolicyEngine()
+        self._template_service = TemplatePackService()
 
     async def create_factory_run(
         self,
@@ -51,6 +59,7 @@ class FactoryRunService:
         template_id: str,
         autonomy_level: str = AUTONOMY_AUTONOMOUS_DEVELOPMENT,
         config: dict[str, Any] | None = None,
+        intent: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         repo = get_repository()
         project = await repo.get_project_twin_by_id(project_id)
@@ -60,8 +69,53 @@ class FactoryRunService:
         template = await repo.get_template_pack(template_id)
         if not template:
             raise ValueError("Template pack not found")
+        template_context = await self._template_service.build_registry_context(template.template_id, target_path=".")
 
         config = dict(config or {})
+        intent_record: Intent | None = None
+        intent_payload = dict(intent or {})
+        if intent_payload:
+            intent_summary = str(
+                intent_payload.get("summary")
+                or intent_payload.get("goal")
+                or intent_payload.get("description")
+                or config.get("goal")
+                or (template.opencode_worker or {}).get("goal")
+                or ""
+            ).strip()
+            if not intent_summary:
+                raise ValueError("Intent summary is required")
+            intent_budget = dict(intent_payload.get("budget") or config.get("budget") or {})
+            intent_stop_conditions = list(intent_payload.get("stop_conditions") or config.get("stop_conditions") or [])
+            intent_record = Intent(
+                idea_id=project.idea_id,
+                project_id=project_id,
+                summary=intent_summary,
+                details=dict(intent_payload.get("details") or {}),
+                correlation_id=str(intent_payload.get("correlation_id") or config.get("correlation_id") or ""),
+                dedupe_hash=self._stable_hash({
+                    "idea_id": project.idea_id,
+                    "project_id": project_id,
+                    "template_id": template.template_id,
+                    "template_version": template.version,
+                    "summary": intent_summary,
+                    "budget": intent_budget,
+                    "stop_conditions": intent_stop_conditions,
+                }),
+                budget=intent_budget,
+                stop_conditions=intent_stop_conditions,
+                source=str(intent_payload.get("source") or "manual"),
+            )
+            await repo.save_intent(intent_record)
+            config.setdefault("goal", intent_summary)
+            config["intent"] = {
+                "id": intent_record.id,
+                "summary": intent_record.summary,
+                "details": intent_record.details,
+                "correlation_id": intent_record.correlation_id,
+                "dedupe_hash": intent_record.dedupe_hash,
+            }
+
         engine = config.get("engine", "opencode-server")
         if autonomy_level in HIGH_AUTONOMY_LEVELS:
             try:
@@ -72,6 +126,7 @@ class FactoryRunService:
             project=project,
             template=template,
             config=config,
+            template_context=template_context,
         )
         policy_result = self._policy_engine.validate_blueprint(
             blueprint,
@@ -81,14 +136,42 @@ class FactoryRunService:
         if policy_result.status == "block":
             raise PolicyBlockedError(policy_result)
 
+        template_manifest = dict((template_context or {}).get("template_manifest") or {})
+        if not template_manifest.get("id"):
+            template_manifest = {
+                "id": template.template_id,
+                "template_id": template.template_id,
+                "version": template.version,
+                "display_name": template.display_name,
+                "verification_commands": list((template.opencode_worker or {}).get("verification_commands") or []),
+                "graphify_expectations": dict((template_context or {}).get("graphify_expectations") or {}),
+                "allowed_paths": list((template_context or {}).get("path_guardrails", {}).get("allowed_paths") or []),
+                "forbidden_paths": list((template_context or {}).get("path_guardrails", {}).get("forbidden_paths") or []),
+                "review_metadata": dict((template_context or {}).get("review_metadata") or {}),
+            }
+        path_guardrails = self._normalize_path_guardrails((template_context or {}).get("path_guardrails"), template_manifest)
+
         run_config = {
             **config,
             "autonomy_level": autonomy_level,
             "template_version": template.version,
             "template_id": template.template_id,
+            "template_manifest": template_manifest,
+            "verification_commands": template_context.get("verification_commands") if template_context else [],
+            "graphify_expectations": template_context.get("graphify_expectations") if template_context else {},
+            "path_guardrails": path_guardrails,
+            "resolved_agents_hierarchy": template_context.get("resolved_agents") if template_context else [],
+            "review_metadata": template_context.get("review_metadata") if template_context else {},
             "project_blueprint": to_jsonable(blueprint),
             "policy_result": policy_result.to_dict(),
         }
+        if intent_record:
+            run_config["intent_id"] = intent_record.id
+            run_config["intent_summary"] = intent_record.summary
+            run_config["intent_details"] = intent_record.details
+            run_config["budget"] = intent_record.budget
+            run_config["stop_conditions"] = intent_record.stop_conditions
+        run_config.setdefault("goal", config.get("goal") or (intent_record.summary if intent_record else (template.opencode_worker or {}).get("goal")))
         if policy_result.feedback:
             run_config["planner_feedback"] = list(policy_result.feedback)
 
@@ -97,15 +180,68 @@ class FactoryRunService:
             template_id=template.template_id,
             status="queued",
             config=dict(run_config),
+            intent_id=intent_record.id if intent_record else None,
+            run_type="intent_driven" if intent_record else config.get("run_type", "standard"),
+            correlation_id=str(intent_record.correlation_id or config.get("correlation_id") or "") if intent_record else str(config.get("correlation_id") or ""),
+            dedupe_hash=self._stable_hash({
+                "idea_id": project.idea_id,
+                "project_id": project_id,
+                "template_id": template.template_id,
+                "template_version": template.version,
+                "intent_id": intent_record.id if intent_record else None,
+                "goal": run_config.get("goal"),
+                "run_type": "intent_driven" if intent_record else config.get("run_type", "standard"),
+            }),
+            budget=dict(intent_record.budget if intent_record else config.get("budget") or {}),
+            stop_conditions=list(intent_record.stop_conditions if intent_record else config.get("stop_conditions") or []),
         )
         role_contracts = await self._build_role_contracts(
             project=project,
             template=template,
             factory_run_id=factory_run.id,
             run_config=run_config,
+            template_context=template_context,
         )
         factory_run.config["role_contracts"] = role_contracts
+        if not factory_run.correlation_id:
+            factory_run.correlation_id = f"factory-run:{factory_run.id}"
+        factory_run.config["correlation_id"] = factory_run.correlation_id
         await repo.create_factory_run(factory_run)
+        if intent_record:
+            intent_record.correlation_id = intent_record.correlation_id or factory_run.correlation_id
+            if factory_run.id not in intent_record.factory_run_ids:
+                intent_record.factory_run_ids.append(factory_run.id)
+            await repo.save_intent(intent_record)
+            await self._emit_worker_event(
+                repo,
+                worker_id="system",
+                event_type="intent_created",
+                payload={
+                    "intent_id": intent_record.id,
+                    "summary": intent_record.summary,
+                    "factory_run_id": factory_run.id,
+                    "project_id": project_id,
+                },
+                factory_run_id=factory_run.id,
+                correlation_id=factory_run.correlation_id,
+                actor="system",
+                idempotency_key=f"intent-created:{intent_record.id}",
+            )
+        await self._emit_worker_event(
+            repo,
+            worker_id="system",
+            event_type="factory_run_created",
+            payload={
+                "factory_run_id": factory_run.id,
+                "template_id": template.template_id,
+                "project_id": project_id,
+                "intent_id": intent_record.id if intent_record else None,
+            },
+            factory_run_id=factory_run.id,
+            correlation_id=factory_run.correlation_id,
+            actor="system",
+            idempotency_key=f"factory-run-created:{factory_run.id}",
+        )
 
         phases = await self._generate_phases(repo, factory_run, template)
 
@@ -126,6 +262,7 @@ class FactoryRunService:
                 factory_run=factory_run,
                 phase=first_phase,
                 batch=first_batch,
+                template_context=template_context,
             )
 
             if can_enqueue_work(factory_run):
@@ -136,6 +273,17 @@ class FactoryRunService:
                     payload=worker_contract,
                     idempotency_key=f"factory:{factory_run.id}:phase:{first_phase.phase_key}",
                     priority=60,
+                    factory_run_id=factory_run.id,
+                    rationale=intent_record.summary if intent_record else config.get("goal"),
+                    correlation_id=factory_run.correlation_id,
+                    dedupe_hash=self._stable_hash({
+                        "factory_run_id": factory_run.id,
+                        "phase_key": first_phase.phase_key,
+                        "batch_key": first_batch.batch_key,
+                    }),
+                    budget=dict(factory_run.budget or {}),
+                    stop_conditions=list(factory_run.stop_conditions or []),
+                    branch_name=f"factory/{factory_run.id[:8]}/{first_phase.phase_key}",
                 )
 
                 first_batch.work_item_id = work_item.id
@@ -152,6 +300,8 @@ class FactoryRunService:
         bundle = await collect_factory_run_bundle(repo, factory_run.id)
         if not bundle:
             raise ValueError("Factory run not found after creation")
+        research_artifacts = await repo.list_research_artifacts(factory_run.id)
+        review_packet = await repo.get_review_packet(factory_run.id)
         return {
             "factory_run": to_jsonable(bundle["factory_run"]),
             "phases": [to_jsonable(p) for p in bundle["phases"]],
@@ -159,6 +309,18 @@ class FactoryRunService:
             "work_item": to_jsonable(work_item) if work_item else None,
             "tracking_manifest": to_jsonable(bundle["tracking_manifest"]),
             "tracking_summary": bundle["tracking_summary"],
+            "intent": to_jsonable(intent_record) if intent_record else None,
+            "research_artifacts": [to_jsonable(artifact) for artifact in research_artifacts],
+            "research_artifact_count": len(research_artifacts),
+            "research_handoff": to_jsonable(review_packet) if review_packet and review_packet.packet_type == "research_handoff" else None,
+            "factory_state": {
+                "intent_summary": intent_record.summary if intent_record else factory_run.config.get("goal"),
+                "correlation_id": factory_run.correlation_id or (intent_record.correlation_id if intent_record else None),
+                "budget": factory_run.budget or (intent_record.budget if intent_record else {}),
+                "stop_conditions": factory_run.stop_conditions or (intent_record.stop_conditions if intent_record else []),
+                "research_artifact_count": len(research_artifacts),
+                "handoff_status": review_packet.wait_window_state if review_packet and review_packet.packet_type == "research_handoff" else "not_created",
+            },
         }
 
     async def get_factory_run(self, factory_run_id: str) -> dict[str, Any]:
@@ -166,13 +328,29 @@ class FactoryRunService:
         bundle = await collect_factory_run_bundle(repo, factory_run_id)
         if not bundle:
             raise ValueError("Factory run not found")
+        factory_run: FactoryRun = bundle["factory_run"]
+        intent = await repo.get_intent(factory_run.idea_id, factory_run.intent_id) if factory_run.intent_id else None
+        research_artifacts = await repo.list_research_artifacts(factory_run_id)
+        review_packet = await repo.get_review_packet(factory_run_id)
         return {
-            "factory_run": to_jsonable(bundle["factory_run"]),
+            "factory_run": to_jsonable(factory_run),
             "phases": [to_jsonable(p) for p in bundle["phases"]],
             "batches": [to_jsonable(b) for b in bundle["batches"]],
             "verifications": [to_jsonable(v) for v in bundle["verifications"]],
             "tracking_manifest": to_jsonable(bundle["tracking_manifest"]),
             "tracking_summary": bundle["tracking_summary"],
+            "intent": to_jsonable(intent) if intent else None,
+            "research_artifacts": [to_jsonable(artifact) for artifact in research_artifacts],
+            "research_artifact_count": len(research_artifacts),
+            "research_handoff": to_jsonable(review_packet) if review_packet and review_packet.packet_type == "research_handoff" else None,
+            "factory_state": {
+                "intent_summary": intent.summary if intent else factory_run.config.get("goal"),
+                "correlation_id": factory_run.correlation_id or (intent.correlation_id if intent else None),
+                "budget": factory_run.budget or (intent.budget if intent else {}),
+                "stop_conditions": factory_run.stop_conditions or (intent.stop_conditions if intent else []),
+                "research_artifact_count": len(research_artifacts),
+                "handoff_status": review_packet.wait_window_state if review_packet and review_packet.packet_type == "research_handoff" else "not_created",
+            },
         }
 
     async def list_factory_runs(self, project_id: str) -> dict[str, Any]:
@@ -183,6 +361,193 @@ class FactoryRunService:
         runs = await repo.list_factory_runs(idea_id=project.idea_id)
         return {
             "factory_runs": [to_jsonable(r) for r in runs],
+        }
+
+    async def create_research_artifact(
+        self,
+        factory_run_id: str,
+        *,
+        title: str,
+        source: str,
+        raw_content: str | None = None,
+        raw_content_uri: str | None = None,
+        raw_metadata: dict[str, Any] | None = None,
+        normalized: dict[str, Any] | None = None,
+        force: bool = False,
+        correlation_id: str | None = None,
+        actor: str = "system",
+    ) -> dict[str, Any]:
+        repo = get_repository()
+        run = await repo.get_factory_run(factory_run_id)
+        if not run:
+            raise ValueError("Factory run not found")
+
+        normalized_payload = dict(normalized or self._normalize_research_artifact(
+            title=title,
+            source=source,
+            raw_content=raw_content,
+            raw_content_uri=raw_content_uri,
+            raw_metadata=raw_metadata or {},
+        ))
+        dedupe_hash = self._stable_hash({
+            "factory_run_id": factory_run_id,
+            "title": title,
+            "source": source,
+            "raw_content": raw_content or "",
+            "raw_content_uri": raw_content_uri or "",
+            "raw_metadata": raw_metadata or {},
+            "normalized": normalized_payload,
+        })
+
+        if not force:
+            existing = next(
+                (artifact for artifact in await repo.list_research_artifacts(factory_run_id, statuses={"active"}) if artifact.dedupe_hash == dedupe_hash),
+                None,
+            )
+            if existing:
+                return {
+                    "research_artifact": to_jsonable(existing),
+                    "deduped": True,
+                }
+
+        metadata = ArtifactMetadata(
+            source=source,
+            source_uri=raw_content_uri,
+            actor=actor,
+            correlation_id=correlation_id or run.correlation_id,
+            dedupe_hash=dedupe_hash,
+            extra=dict(raw_metadata or {}),
+        )
+        artifact = ResearchArtifact(
+            factory_run_id=factory_run_id,
+            title=title,
+            source=source,
+            raw_content=raw_content,
+            raw_content_uri=raw_content_uri,
+            raw_metadata=dict(raw_metadata or {}),
+            normalized=normalized_payload,
+            artifact_metadata=metadata,
+            dedupe_hash=dedupe_hash,
+        )
+        artifact = await repo.save_research_artifact(artifact)
+
+        event_correlation_id = correlation_id or run.correlation_id or artifact.id
+        await self._emit_worker_event(
+            repo,
+            worker_id="system",
+            event_type="research_imported",
+            payload={
+                "research_artifact_id": artifact.id,
+                "factory_run_id": factory_run_id,
+                "title": title,
+                "source": source,
+                "dedupe_hash": dedupe_hash,
+            },
+            factory_run_id=factory_run_id,
+            research_artifact_id=artifact.id,
+            correlation_id=event_correlation_id,
+            actor=actor,
+            idempotency_key=f"research-imported:{artifact.id}",
+        )
+        await self._emit_worker_event(
+            repo,
+            worker_id="system",
+            event_type="research_normalized",
+            payload={
+                "research_artifact_id": artifact.id,
+                "normalized": normalized_payload,
+            },
+            factory_run_id=factory_run_id,
+            research_artifact_id=artifact.id,
+            correlation_id=event_correlation_id,
+            actor=actor,
+            idempotency_key=f"research-normalized:{artifact.id}",
+        )
+
+        return {
+            "research_artifact": to_jsonable(artifact),
+            "deduped": False,
+        }
+
+    async def _emit_worker_event(
+        self,
+        repo: Any,
+        *,
+        worker_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+        factory_run_id: str | None = None,
+        research_artifact_id: str | None = None,
+        review_packet_id: str | None = None,
+        correlation_id: str | None = None,
+        idempotency_key: str | None = None,
+        actor: str | None = None,
+        work_item_id: str | None = None,
+    ) -> WorkerEvent:
+        event = WorkerEvent(
+            worker_id=worker_id,
+            event_type=event_type,
+            payload=payload,
+            work_item_id=work_item_id,
+            factory_run_id=factory_run_id,
+            research_artifact_id=research_artifact_id,
+            review_packet_id=review_packet_id,
+            correlation_id=correlation_id,
+            idempotency_key=idempotency_key,
+            actor=actor,
+        )
+        await repo.add_worker_event(event)
+        return event
+
+    def _normalize_research_artifact(
+        self,
+        *,
+        title: str,
+        source: str,
+        raw_content: str | None,
+        raw_content_uri: str | None,
+        raw_metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        text = (raw_content or "").strip()
+        summary = ""
+        if text:
+            summary = next((line.strip("-* \t") for line in text.splitlines() if line.strip()), "")
+        if not summary:
+            summary = title.strip() or source.strip()
+
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        key_points = [line.lstrip("-* ").strip() for line in lines if line.lstrip().startswith(("-", "*"))][:8]
+        if not key_points and text:
+            key_points = lines[:5]
+
+        return {
+            "title": title,
+            "source": source,
+            "summary": summary,
+            "key_points": key_points,
+            "word_count": len(text.split()) if text else 0,
+            "raw_content_uri": raw_content_uri,
+            "metadata": dict(raw_metadata or {}),
+        }
+
+    def _stable_hash(self, payload: dict[str, Any]) -> str:
+        normalized = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+    def _normalize_path_guardrails(
+        self,
+        path_guardrails: dict[str, Any] | None,
+        template_manifest: dict[str, Any] | None = None,
+    ) -> dict[str, list[str]]:
+        allowed_paths = list((path_guardrails or {}).get("allowed_paths") or (template_manifest or {}).get("allowed_paths") or [])
+        forbidden_paths = list((path_guardrails or {}).get("forbidden_paths") or (template_manifest or {}).get("forbidden_paths") or [])
+        if not allowed_paths:
+            allowed_paths = ["backend/**", "frontend/**", "docs/**", "scripts/**", "tests/**"]
+        if not forbidden_paths:
+            forbidden_paths = [".karkhana/**"]
+        return {
+            "allowed_paths": allowed_paths,
+            "forbidden_paths": forbidden_paths,
         }
 
     async def _generate_phases(
@@ -215,13 +580,20 @@ class FactoryRunService:
         factory_run: FactoryRun,
         phase: FactoryPhase,
         batch: FactoryBatch,
+        template_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         repo = get_repository()
         template_docs = await self._collect_template_docs(repo, template.template_id)
         code_index = await repo.get_latest_code_index(project.idea_id)
+        intent = await repo.get_intent(project.idea_id, factory_run.intent_id) if factory_run.intent_id else None
         project_blueprint = dict((factory_run.config or {}).get("project_blueprint") or {})
         permission_profile = project_blueprint.get("permission_profile") or {}
         policy_result = (factory_run.config or {}).get("policy_result") or {}
+        template_manifest = dict((factory_run.config or {}).get("template_manifest") or (template_context or {}).get("template_manifest") or {})
+        verification_expectations = list((factory_run.config or {}).get("verification_commands") or template_manifest.get("verification_commands") or [])
+        graphify_expectations = dict((factory_run.config or {}).get("graphify_expectations") or template_manifest.get("graphify_expectations") or {})
+        path_guardrails = self._normalize_path_guardrails((factory_run.config or {}).get("path_guardrails"), template_manifest)
+        resolved_agents_hierarchy = list((factory_run.config or {}).get("resolved_agents_hierarchy") or (template_context or {}).get("resolved_agents") or [])
 
         constraints = template.constraints or []
         opencode_worker = template.opencode_worker or {}
@@ -277,6 +649,17 @@ class FactoryRunService:
             "deliverables": deliverables,
             "verification_commands": verification_commands,
             "graphify_instructions": graphify_instructions,
+            "template_manifest": template_manifest,
+            "template_version": template.version,
+            "template_id": template.template_id,
+            "verification_expectations": verification_expectations,
+            "graphify_expectations": graphify_expectations,
+            "path_guardrails": path_guardrails,
+            "resolved_agents_hierarchy": resolved_agents_hierarchy,
+            "intent": to_jsonable(intent) if intent else {},
+            "intent_summary": intent.summary if intent else (factory_run.config or {}).get("goal", ""),
+            "budget": dict(factory_run.budget or {}),
+            "stop_conditions": list(factory_run.stop_conditions or []),
             "goal": opencode_worker.get("goal") or f"Execute factory phase '{phase.phase_key}' for project {project.repo_full_name}",
         }
         role_prompt = RolePromptBuilder.build(FactoryRole.WORKER, role_context)
@@ -340,6 +723,11 @@ class FactoryRunService:
             "deliverables": deliverables,
             "verification_commands": verification_commands,
             "graphify_instructions": graphify_instructions,
+            "template_manifest": template_manifest,
+            "verification_expectations": verification_expectations,
+            "graphify_expectations": graphify_expectations,
+            "path_guardrails": path_guardrails,
+            "resolved_agents_hierarchy": resolved_agents_hierarchy,
             "response_schema": role_prompt["output_schema"],
             "verifier_contract": verifier_contract,
         }
@@ -363,6 +751,8 @@ class FactoryRunService:
                 key = artifact.artifact_key
                 if key.startswith("AGENTS.md#"):
                     key = "AGENTS.md"
+                elif key.startswith("AGENTS.override.md#"):
+                    key = "AGENTS.override.md"
                 docs.append({
                     "key": key,
                     "uri": artifact.uri,
@@ -380,20 +770,30 @@ class FactoryRunService:
         template: TemplatePack,
         factory_run_id: str,
         run_config: dict[str, Any],
+        template_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         repo = get_repository()
         template_docs = await self._collect_template_docs(repo, template.template_id)
         code_index = await repo.get_latest_code_index(project.idea_id)
+        intent_id = run_config.get("intent_id")
+        intent = await repo.get_intent(project.idea_id, intent_id) if intent_id else None
         code_context = {
             "template_docs": template_docs,
             "code_index": to_jsonable(code_index) if code_index else {},
             "constraints": template.constraints or [],
             "quality_gates": template.quality_gates or [],
+            "template_manifest": (template_context or {}).get("template_manifest") or {},
+            "verification_commands": (template_context or {}).get("verification_commands") or [],
+            "graphify_expectations": (template_context or {}).get("graphify_expectations") or {},
+            "path_guardrails": self._normalize_path_guardrails((template_context or {}).get("path_guardrails"), (template_context or {}).get("template_manifest") or {}),
         }
         research_context = {
             "project_description": project.desired_outcome or project.current_status or "",
             "detected_stack": project.detected_stack,
             "test_commands": project.test_commands,
+            "intent_summary": intent.summary if intent else (run_config.get("goal") or ""),
+            "budget": dict(run_config.get("budget") or {}),
+            "stop_conditions": list(run_config.get("stop_conditions") or []),
         }
         phase_blueprints = [
             {
@@ -437,6 +837,7 @@ class FactoryRunService:
         project: ProjectTwin,
         template: TemplatePack,
         config: dict[str, Any],
+        template_context: dict[str, Any] | None = None,
     ) -> ProjectBlueprint:
         repo = get_repository()
         code_index = await repo.get_latest_code_index(project.idea_id)
@@ -447,7 +848,7 @@ class FactoryRunService:
         verification_commands = (
             blueprint_config["verification_commands"]
             if "verification_commands" in blueprint_config
-            else self._derive_verification_commands(project=project, template=template)
+            else self._derive_verification_commands(project=project, template=template, template_context=template_context)
         )
         required_capabilities = (
             blueprint_config["required_capabilities"]
@@ -474,7 +875,7 @@ class FactoryRunService:
             "build_steps": build_steps,
             "verification_commands": verification_commands,
             "required_capabilities": required_capabilities,
-            "graphify_requirements": blueprint_config["graphify_requirements"] if "graphify_requirements" in blueprint_config else self._default_graphify_requirements(),
+            "graphify_requirements": blueprint_config["graphify_requirements"] if "graphify_requirements" in blueprint_config else self._derive_graphify_requirements(template_context),
         }
         if "permission_profile" in blueprint_config:
             blueprint_kwargs["permission_profile"] = blueprint_config["permission_profile"]
@@ -541,8 +942,10 @@ class FactoryRunService:
             steps.append(f"Execute template {template.template_id}")
         return steps
 
-    def _derive_verification_commands(self, *, project: ProjectTwin, template: TemplatePack) -> list[str]:
-        verification_commands = _copy_list((template.opencode_worker or {}).get("verification_commands"))
+    def _derive_verification_commands(self, *, project: ProjectTwin, template: TemplatePack, template_context: dict[str, Any] | None = None) -> list[str]:
+        verification_commands = _copy_list((template_context or {}).get("verification_commands"))
+        if not verification_commands:
+            verification_commands = _copy_list((template.opencode_worker or {}).get("verification_commands"))
         if not verification_commands:
             verification_commands = _copy_list(project.test_commands)
         if "graphify update ." not in verification_commands:
@@ -619,7 +1022,10 @@ class FactoryRunService:
             notes=notes,
         )
 
-    def _default_graphify_requirements(self) -> dict[str, list[str]]:
+    def _derive_graphify_requirements(self, template_context: dict[str, Any] | None = None) -> dict[str, Any]:
+        graphify_expectations = (template_context or {}).get("graphify_expectations") or {}
+        if graphify_expectations:
+            return graphify_expectations
         return {
             "pre_task": [
                 "Read graphify-out/GRAPH_REPORT.md for god nodes and community structure",

@@ -10,7 +10,8 @@
     project: 'Project Twin',
     reports: 'Reports',
     actions: 'Research Actions',
-    workers: 'Local Workers'
+    workers: 'Local Workers',
+    templates: 'Templates'
   };
 
   function navigateActive(route) {

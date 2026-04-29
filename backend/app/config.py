@@ -7,22 +7,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    ai_provider: str = Field(default="zai", alias="AI_PROVIDER")
-    ai_model: str = Field(default="glm-5.1", alias="AI_MODEL")
+    ai_provider: str = Field(default="codex-lb", alias="AI_PROVIDER")
+    ai_model: str = Field(default="gpt-5.5", alias="AI_MODEL")
 
-    opencodego_api_key: str = Field(default="", alias="OPENCODEGO_API_KEY")
-    opencodego_api_base_url: str = Field(
-        default="https://opencode.ai/zen/go/v1",
-        alias="OPENCODEGO_API_BASE_URL",
+    codex_lb_api_key: str = Field(default="", alias="CODEX_LB_API_KEY")
+    codex_lb_api_base_url: str = Field(
+        default="http://127.0.0.1:2455/v1",
+        alias="CODEX_LB_API_BASE_URL",
     )
-    opencodego_model: str = Field(default="deepseek-v4-pro", alias="OPENCODEGO_MODEL")
-
-    zai_api_key: str = Field(default="", alias="ZAI_API_KEY")
-    zai_api_base_url: str = Field(
-        default="https://api.z.ai/api/coding/paas/v4",
-        alias="ZAI_API_BASE_URL",
+    codex_lb_model: str = Field(default="gpt-5.5", alias="CODEX_LB_MODEL")
+    opencode_config_path: str = Field(
+        default=str(Path.home() / ".config" / "opencode" / "opencode.json"),
+        alias="OPENCODE_CONFIG_PATH",
     )
-    zai_model: str = Field(default="glm-5.1", alias="ZAI_MODEL")
     github_app_id: str = Field(default="", alias="GITHUB_APP_ID")
     github_app_private_key: str = Field(default="", alias="GITHUB_APP_PRIVATE_KEY")
     github_app_private_key_path: str = Field(default="", alias="GITHUB_APP_PRIVATE_KEY_PATH")
@@ -45,10 +42,6 @@ class Settings(BaseSettings):
     )
     max_repair_attempts_per_task: int = Field(default=3, alias="IDEAREFINERY_MAX_REPAIR_ATTEMPTS_PER_TASK")
     max_repair_attempts_per_batch: int = Field(default=5, alias="IDEAREFINERY_MAX_REPAIR_ATTEMPTS_PER_BATCH")
-    claude_settings_path: str = Field(
-        default=str(Path.home() / ".claude" / "settings.json"),
-        alias="CLAUDE_SETTINGS_PATH",
-    )
 
 
 settings = Settings()

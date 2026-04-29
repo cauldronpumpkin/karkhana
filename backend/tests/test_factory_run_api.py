@@ -127,6 +127,7 @@ async def test_create_factory_run(test_client: AsyncClient, db_session):
     assert data["factory_run"]["template_id"] == "fullstack-saas-v1"
     assert data["factory_run"]["config"]["template_version"] == "2.0.0"
     assert data["factory_run"]["config"]["stack"] == "python-fastapi"
+    assert data["factory_run"]["config"]["template_manifest"]["id"] == "fullstack-saas-v1"
     assert data["factory_run"]["config"]["role_contracts"]["planner"]["role"] == "planner"
     assert data["factory_run"]["config"]["role_contracts"]["batch_planner"]["role"] == "batch_planner"
     assert data["factory_run"]["idea_id"] == seed["idea"].id
@@ -226,6 +227,9 @@ async def test_create_factory_run_work_item_contract(test_client: AsyncClient, d
 
     assert payload["template_version"] == "2.0.0"
     assert payload["template_id"] == "fullstack-saas-v1"
+    assert payload["template_manifest"]["id"] == "fullstack-saas-v1"
+    assert payload["path_guardrails"]["allowed_paths"]
+    assert payload["resolved_agents_hierarchy"] == []
 
     assert len(payload["constraints"]) == 2
     assert payload["constraints"][0]["id"] == "no-secrets"
@@ -263,6 +267,33 @@ async def test_create_factory_run_work_item_contract(test_client: AsyncClient, d
     assert "phase_artifacts" in schema["properties"]
     assert payload["verifier_contract"]["role"] == "verifier"
     assert payload["verifier_contract"]["output_schema"]["type"] == "object"
+
+
+@pytest.mark.asyncio
+async def test_create_factory_run_with_intent(test_client: AsyncClient, db_session):
+    repo = db_session.repo
+    seed = await _seed_project_and_template(repo)
+    project = seed["project"]
+
+    response = await test_client.post(
+        f"/api/projects/{project.id}/factory-runs",
+        json={
+            "template_id": "fullstack-saas-v1",
+            "config": {"stack": "python-fastapi"},
+            "intent": {
+                "summary": "Ship the factory state MVP",
+                "details": {"notes": "Keep it additive"},
+            },
+        },
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["factory_run"]["intent_id"] is not None
+    assert data["factory_run"]["run_type"] == "intent_driven"
+    assert data["intent"]["summary"] == "Ship the factory state MVP"
+    assert data["factory_state"]["intent_summary"] == "Ship the factory state MVP"
+    assert data["factory_state"]["research_artifact_count"] == 0
 
 
 @pytest.mark.asyncio

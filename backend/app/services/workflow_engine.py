@@ -73,6 +73,12 @@ class WorkflowEngine(Protocol):
         event_type: str,
         payload: dict[str, Any],
         work_item_id: str | None = None,
+        factory_run_id: str | None = None,
+        research_artifact_id: str | None = None,
+        review_packet_id: str | None = None,
+        correlation_id: str | None = None,
+        idempotency_key: str | None = None,
+        actor: str | None = None,
     ) -> WorkerEvent: ...
 
     async def request_verification(
@@ -219,6 +225,11 @@ class SqsDdbWorkflowEngine:
             payload=contract,
             idempotency_key=f"factory:{run.id}:phase:{next_phase.phase_key}",
             priority=60,
+            factory_run_id=run.id,
+            correlation_id=run.correlation_id,
+            budget=dict(run.budget or {}),
+            stop_conditions=list(run.stop_conditions or []),
+            branch_name=f"factory/{run.id[:8]}/{next_phase.phase_key}",
         )
 
         next_batch.work_item_id = work_item.id
@@ -244,6 +255,12 @@ class SqsDdbWorkflowEngine:
         event_type: str,
         payload: dict[str, Any],
         work_item_id: str | None = None,
+        factory_run_id: str | None = None,
+        research_artifact_id: str | None = None,
+        review_packet_id: str | None = None,
+        correlation_id: str | None = None,
+        idempotency_key: str | None = None,
+        actor: str | None = None,
     ) -> WorkerEvent:
         """Persist a worker event."""
         event = WorkerEvent(
@@ -251,6 +268,12 @@ class SqsDdbWorkflowEngine:
             event_type=event_type,
             payload=payload,
             work_item_id=work_item_id,
+            factory_run_id=factory_run_id,
+            research_artifact_id=research_artifact_id,
+            review_packet_id=review_packet_id,
+            correlation_id=correlation_id,
+            idempotency_key=idempotency_key,
+            actor=actor,
         )
         await self._repo.add_worker_event(event)
         return event

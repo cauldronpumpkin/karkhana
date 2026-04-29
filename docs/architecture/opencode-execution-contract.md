@@ -111,8 +111,8 @@ The backend builds a worker contract in `FactoryRunService._build_worker_contrac
   "role_prompt_template": "<template identifier>",
   "role_required_inputs": ["field_a", "field_b"],
   "role_output_schema": {"type": "object", "properties": {...}},
-  "role_provider": "opencodego",
-  "role_model": "deepseek-v4-pro",
+  "role_provider": "codex-lb",
+  "role_model": "gpt-5.5",
   "messages": [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}],
   "prompt": "<duplicate of role_prompt for backward compatibility>",
   "factory_run_id": "<uuid>",
@@ -316,9 +316,9 @@ These are **instructional**, not enforceable by the backend. Enforcement relies 
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENCODEGO_API_KEY` | API key for OpenCode Go provider (used by backend LLMService, not worker) |
-| `OPENCODEGO_API_BASE_URL` | Default: `https://opencode.ai/zen/go/v1` |
-| `OPENCODEGO_MODEL` | Default: `deepseek-v4-pro` |
+| `CODEX_LB_API_KEY` | Optional API key for the Codex LB proxy; if unset, local OpenCode config is used |
+| `CODEX_LB_API_BASE_URL` | Default: `http://127.0.0.1:2455/v1` |
+| `CODEX_LB_MODEL` | Default: `gpt-5.5` |
 | `IDEAREFINERY_WORKER_COMMAND_QUEUE_URL` | SQS queue for worker commands |
 | `IDEAREFINERY_WORKER_EVENT_QUEUE_URL` | SQS queue for worker events |
 | `IDEAREFINERY_WORKER_CLIENT_ROLE_ARN` | AWS STS role for worker credentials |
@@ -342,10 +342,10 @@ These are **instructional**, not enforceable by the backend. Enforcement relies 
   "opencode_server_url": "http://127.0.0.1:4096",
   "litellm_port": 4000,
   "litellm_config": {
-    "deepseek-v4-pro": {
-      "litellm_model": "openai/deepseek-v4-pro",
-      "api_base": "https://opencode.ai/zen/go/v1",
-      "api_key_env": "OPENCODEGO_API_KEY"
+    "gpt-5.5": {
+      "litellm_model": "openai/gpt-5.5",
+      "api_base": "http://127.0.0.1:2455/v1",
+      "api_key_env": "CODEX_LB_API_KEY"
     }
   }
 }

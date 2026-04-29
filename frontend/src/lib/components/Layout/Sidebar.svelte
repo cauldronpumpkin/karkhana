@@ -22,20 +22,21 @@
     { name: 'Chat', route: 'chat', icon: MessageCircle, requiresIdea: true },
     { name: 'Project Twin', route: 'project', icon: GitBranch, requiresIdea: true },
     { name: 'Karkhana AI', route: 'karkhana', icon: Cog, requiresIdea: true },
+    { name: 'Review Cockpit', route: 'review', icon: ShieldCheck, requiresIdea: false },
     { name: 'Reports', route: 'reports', icon: FileText, requiresIdea: true },
     { name: 'Research Actions', route: 'actions', icon: BarChart3, requiresIdea: true }
   ];
 
   const resources = [
     { name: 'Local Workers', route: 'workers', icon: ServerCog },
-    { name: 'Templates', icon: Blocks },
+    { name: 'Templates', route: 'templates', icon: Blocks },
     { name: 'Prompt Library', icon: TerminalSquare },
     { name: 'Integrations', icon: Plug },
     { name: 'Settings', icon: Settings }
   ];
 
   function navHref(item) {
-    if (!item.requiresIdea) return '#/dashboard';
+    if (!item.requiresIdea) return `#/${item.route}`;
     return activeIdeaId ? `#/${item.route}/${activeIdeaId}` : '#/dashboard';
   }
 </script>

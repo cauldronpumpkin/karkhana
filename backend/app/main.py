@@ -21,7 +21,10 @@ from backend.app.routers.projects import router as projects_router
 from backend.app.routers.worker import router as worker_router
 from backend.app.routers.local_workers import router as local_workers_router
 from backend.app.routers.factory_runs import router as factory_runs_router
+from backend.app.routers.templates import router as templates_router
+from backend.app.routers.golden_factory_harness import router as golden_factory_harness_router
 from backend.app.routers.template_artifacts import router as template_artifacts_router
+from backend.app.routers.review_packets import router as review_packets_router
 
 
 app = FastAPI(title="Idea Refinery")
@@ -53,7 +56,10 @@ app.include_router(projects_router)
 app.include_router(worker_router)
 app.include_router(local_workers_router)
 app.include_router(factory_runs_router)
+app.include_router(templates_router)
+app.include_router(golden_factory_harness_router)
 app.include_router(template_artifacts_router)
+app.include_router(review_packets_router)
 
 
 @app.get("/api/health")

@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
-  import { CheckCircle2, GitBranch, GitFork, Loader2, RefreshCw, Server, ShieldCheck, TerminalSquare, XCircle } from 'lucide-svelte';
-  import { api, apiPost } from '../../api.js';
+  import { CheckCircle2, Check, Clipboard, GitBranch, GitFork, Loader2, RefreshCw, Server, ShieldCheck, TerminalSquare, XCircle } from 'lucide-svelte';
+  import { api, apiPost, getBuildNextActions } from '../../api.js';
   import Button from '../UI/Button.svelte';
   import Badge from '../UI/Badge.svelte';
   import KarkhanaRunPanel from '../Karkhana/KarkhanaRunPanel.svelte';
@@ -18,6 +18,14 @@
   let isCreatingRun = $state(false);
   let error = $state('');
   let selectedRunId = $state('');
+  let nextActions = $state([]);
+  let nextActionsSummary = $state(null);
+  let nextActionsLoading = $state(true);
+  let nextActionsError = $state('');
+  let copiedPromptId = $state('');
+  let clipboardMessage = $state('');
+  let clipboardTone = $state('');
+  let clipboardTimeout = null;
 
   let project = $derived(state?.project || null);
   let latestIndex = $derived(state?.latest_index || null);
@@ -64,6 +72,21 @@
       error = err.message || 'Unable to load project twin.';
     } finally {
       isLoading = false;
+    }
+  }
+
+  async function loadNextActions() {
+    if (!ideaId) return;
+    nextActionsLoading = true;
+    nextActionsError = '';
+    try {
+      const response = await getBuildNextActions(ideaId);
+      nextActions = response?.next_actions || [];
+      nextActionsSummary = response?.status_summary || null;
+    } catch (err) {
+      nextActionsError = err.message || 'Unable to load next actions.';
+    } finally {
+      nextActionsLoading = false;
     }
   }
 
@@ -117,7 +140,58 @@
     return 'muted';
   }
 
+  $effect(() => () => {
+    if (clipboardTimeout) clearTimeout(clipboardTimeout);
+  });
+
+  function setClipboardFeedback(message, tone = 'success') {
+    clipboardMessage = message;
+    clipboardTone = tone;
+    if (clipboardTimeout) clearTimeout(clipboardTimeout);
+    clipboardTimeout = setTimeout(() => {
+      clipboardMessage = '';
+      clipboardTone = '';
+    }, 2000);
+  }
+
+  async function copyPrompt(prompt, index) {
+    try {
+      let copied = false;
+      if (navigator?.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(prompt);
+          copied = true;
+        } catch {
+          copied = false;
+        }
+      }
+
+      if (!copied) {
+        const textarea = document.createElement('textarea');
+        textarea.value = prompt;
+        textarea.setAttribute('readonly', 'true');
+        textarea.style.position = 'absolute';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        try {
+          textarea.select();
+          copied = document.execCommand('copy');
+        } finally {
+          if (textarea.parentNode) document.body.removeChild(textarea);
+        }
+        if (!copied) throw new Error('Clipboard fallback unavailable.');
+      }
+      copiedPromptId = `${index}`;
+      setClipboardFeedback('Prompt copied to clipboard.');
+      setTimeout(() => { if (copiedPromptId === `${index}`) copiedPromptId = ''; }, 1500);
+    } catch (err) {
+      copiedPromptId = '';
+      setClipboardFeedback(err?.message || 'Unable to copy prompt.', 'error');
+    }
+  }
+
   onMount(loadProject);
+  onMount(loadNextActions);
 </script>
 
 <div class="project-twin">
@@ -176,6 +250,53 @@
     </section>
 
     <div class="workspace">
+      <section class="panel">
+        <header>
+          <h2><ShieldCheck size={18} /> Next actions</h2>
+        </header>
+        {#if nextActionsLoading}
+          <div class="empty compact"><Loader2 size={24} class="spin" /> Loading next actions...</div>
+        {:else if nextActionsError}
+          <div class="empty compact"><XCircle size={24} /> {nextActionsError}</div>
+        {:else}
+          {#if nextActionsSummary}
+            <div class="facts">
+              <span>{nextActionsSummary.current_phase}</span>
+              <span>{nextActionsSummary.current_step}</span>
+              <span>{nextActionsSummary.project_attached ? 'project linked' : 'no project twin'}</span>
+              <span>{nextActions.length} actions</span>
+            </div>
+          {/if}
+          {#if nextActions.length}
+            <div class="next-actions-list">
+              {#each nextActions as action, index}
+                <article class="next-action-row">
+                  <div class="factory-row-head">
+                    <div>
+                      <strong>{action.title}</strong>
+                      <small>Priority {action.priority} · {action.suggested_owner}</small>
+                    </div>
+                  </div>
+                  <p>{action.reason}</p>
+                  {#if action.codex_prompt}
+                    <div class="prompt-actions">
+                      <Button size="sm" variant="secondary" onclick={() => copyPrompt(action.codex_prompt, index)}>
+                        {#if copiedPromptId === `${index}`}<Check size={14} /> Copied{:else}<Clipboard size={14} /> Copy prompt{/if}
+                      </Button>
+                    </div>
+                  {/if}
+                </article>
+              {/each}
+            </div>
+          {:else}
+            <div class="empty compact">No next actions available.</div>
+          {/if}
+          {#if clipboardMessage}
+            <div class:success={clipboardTone === 'success'} class:error={clipboardTone === 'error'} class="clipboard-feedback">{clipboardMessage}</div>
+          {/if}
+        {/if}
+      </section>
+
       <section class="panel">
         <header>
           <h2><Server size={18} /> Codebase dossier</h2>
@@ -381,6 +502,23 @@
     color: var(--color-text-secondary);
   }
 
+  .compact {
+    min-height: 0;
+  }
+
+  .clipboard-feedback {
+    margin-top: var(--spacing-sm);
+    font-size: 0.9rem;
+  }
+
+  .clipboard-feedback.success {
+    color: var(--color-success);
+  }
+
+  .clipboard-feedback.error {
+    color: var(--color-error);
+  }
+
   .status-grid {
     display: grid;
     gap: var(--spacing-md);
@@ -554,6 +692,22 @@
     display: grid;
     gap: 10px;
     padding: 10px;
+  }
+
+  .next-actions-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .next-action-row {
+    background: rgba(4, 9, 14, 0.82);
+    border: 1px solid rgba(103, 128, 151, 0.22);
+    border-radius: var(--border-radius-md);
+    padding: 10px;
+  }
+
+  .prompt-actions {
+    margin-top: 8px;
   }
 
   .factory-row-head {

@@ -108,6 +108,10 @@ export async function getProjectTwin(ideaId) {
   return api(`/api/ideas/${ideaId}/project`);
 }
 
+export async function getBuildNextActions(ideaId) {
+  return api(`/api/ideas/${ideaId}/build/next-actions`);
+}
+
 export async function getFactoryRunJobs(ideaId) {
   return api(`/api/ideas/${ideaId}/jobs`);
 }

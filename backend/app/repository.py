@@ -48,6 +48,28 @@ def _clean_from_dynamo(value: Any) -> Any:
     return value
 
 
+LEDGER_POLICIES = frozenset({"none", "read_only", "required", "strict"})
+
+
+def _validate_ledger_fields(ledger_policy: str | None, ledger_path: str | None) -> tuple[str, str | None]:
+    policy = (ledger_policy or "none").strip().lower()
+    if policy not in LEDGER_POLICIES:
+        raise ValueError(f"Invalid ledger_policy: {ledger_policy}")
+
+    path = ledger_path.strip() if isinstance(ledger_path, str) else ledger_path
+    if path == "":
+        path = None
+    if policy != "none" and not path:
+        raise ValueError("ledger_path is required when ledger_policy is not 'none'")
+    if path:
+        normalized = path.replace("\\", "/")
+        if normalized.startswith("/") or normalized.startswith("~") or ":" in normalized.split("/", 1)[0]:
+            raise ValueError("ledger_path must be a relative path")
+        if any(part == ".." for part in normalized.split("/")):
+            raise ValueError("ledger_path must not contain traversal segments")
+    return policy, path
+
+
 @dataclass
 class Idea:
     title: str
@@ -267,8 +289,13 @@ class WorkItem:
     result: dict | None = None
     error: str | None = None
     branch_name: str | None = None
+    ledger_policy: str = "none"
+    ledger_path: str | None = None
     created_at: datetime = field(default_factory=utcnow)
     updated_at: datetime = field(default_factory=utcnow)
+
+    def __post_init__(self) -> None:
+        self.ledger_policy, self.ledger_path = _validate_ledger_fields(self.ledger_policy, self.ledger_path)
 
 
 @dataclass
@@ -447,6 +474,8 @@ class FactoryRunTrackingManifest:
     worker_queue_state: dict = field(default_factory=dict)
     verification_state: dict = field(default_factory=dict)
     artifact_uris: dict = field(default_factory=dict)
+    token_economy_totals: dict = field(default_factory=dict)
+    duplicate_work_count: int = 0
     snapshot_uri: str | None = None
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = field(default_factory=utcnow)
@@ -2050,7 +2079,7 @@ class DynamoDBRepository(Repository):
         )
 
     def _work_item(self, item: dict[str, Any]) -> WorkItem:
-        return WorkItem(id=item["id"], idea_id=item["idea_id"], project_id=item["project_id"], job_type=item["job_type"], payload=item.get("payload") or {}, status=item.get("status", "queued"), priority=int(item.get("priority", 50)), factory_run_id=item.get("factory_run_id"), parent_work_item_id=item.get("parent_work_item_id"), rationale=item.get("rationale"), correlation_id=item.get("correlation_id"), dedupe_hash=item.get("dedupe_hash"), budget=item.get("budget") or {}, stop_conditions=item.get("stop_conditions") or [], idempotency_key=item.get("idempotency_key"), worker_id=item.get("worker_id"), claim_token=item.get("claim_token"), claimed_at=_dt(item.get("claimed_at")), heartbeat_at=_dt(item.get("heartbeat_at")), run_after=_dt(item.get("run_after")), retry_count=int(item.get("retry_count", 0)), timeout_seconds=int(item.get("timeout_seconds", 900)), logs=item.get("logs", ""), logs_pointer=item.get("logs_pointer"), result=item.get("result"), error=item.get("error"), branch_name=item.get("branch_name"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
+        return WorkItem(id=item["id"], idea_id=item["idea_id"], project_id=item["project_id"], job_type=item["job_type"], payload=item.get("payload") or {}, status=item.get("status", "queued"), priority=int(item.get("priority", 50)), factory_run_id=item.get("factory_run_id"), parent_work_item_id=item.get("parent_work_item_id"), rationale=item.get("rationale"), correlation_id=item.get("correlation_id"), dedupe_hash=item.get("dedupe_hash"), budget=item.get("budget") or {}, stop_conditions=item.get("stop_conditions") or [], idempotency_key=item.get("idempotency_key"), worker_id=item.get("worker_id"), claim_token=item.get("claim_token"), claimed_at=_dt(item.get("claimed_at")), heartbeat_at=_dt(item.get("heartbeat_at")), run_after=_dt(item.get("run_after")), retry_count=int(item.get("retry_count", 0)), timeout_seconds=int(item.get("timeout_seconds", 900)), logs=item.get("logs", ""), logs_pointer=item.get("logs_pointer"), result=item.get("result"), error=item.get("error"), branch_name=item.get("branch_name"), ledger_policy=item.get("ledger_policy", "none"), ledger_path=item.get("ledger_path"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
 
     def _agent_run(self, item: dict[str, Any]) -> AgentRun:
         return AgentRun(id=item["id"], work_item_id=item["work_item_id"], idea_id=item["idea_id"], project_id=item["project_id"], engine=item["engine"], agent_name=item.get("agent_name"), model=item.get("model"), status=item.get("status", "running"), prompt=item.get("prompt", ""), output=item.get("output", ""), started_at=_dt(item.get("started_at")) or utcnow(), completed_at=_dt(item.get("completed_at")))
@@ -2116,6 +2145,8 @@ class DynamoDBRepository(Repository):
             worker_queue_state=item.get("worker_queue_state") or {},
             verification_state=item.get("verification_state") or {},
             artifact_uris=item.get("artifact_uris") or {},
+            token_economy_totals=item.get("token_economy_totals") or {},
+            duplicate_work_count=int(item.get("duplicate_work_count", 0)),
             snapshot_uri=item.get("snapshot_uri"),
             created_at=_dt(item.get("created_at")) or utcnow(),
             updated_at=_dt(item.get("updated_at")) or utcnow(),

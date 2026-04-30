@@ -48,6 +48,14 @@ async def get_template_manifest(template_id: str):
     return {"manifest": manifest}
 
 
+@router.get("/api/templates/{template_id}/context-cards")
+async def get_template_context_cards(template_id: str):
+    payload = await get_service().get_template_context_cards(template_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Template context cards not found")
+    return payload
+
+
 @router.post("/api/templates/{template_id}/validate")
 async def validate_template(template_id: str, body: ValidateTemplateRequest | None = None):
     try:

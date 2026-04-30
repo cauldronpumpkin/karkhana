@@ -25,6 +25,22 @@ SPEC_KEY = ".spec.md"
 MEMORY_KEY = ".memory.md"
 
 
+def _coerce_dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _coerce_str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _coerce_dict_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [_coerce_dict(item) for item in value]
+
+
 @dataclass(slots=True)
 class TemplatePackManifestArtifactRef:
     key: str
@@ -35,6 +51,65 @@ class TemplatePackManifestArtifactRef:
     scope_path: str | None = None
     storage_key: str | None = None
 
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TemplatePackManifestArtifactRef":
+        payload = _coerce_dict(data)
+        scope_path = str(payload.get("scope_path") or "").strip() or None
+        storage_key = str(payload.get("storage_key") or "").strip() or None
+        return cls(
+            key=str(payload.get("key") or ""),
+            path=str(payload.get("path") or ""),
+            kind=str(payload.get("kind") or "artifact"),
+            description=str(payload.get("description") or ""),
+            required=bool(payload.get("required", True)),
+            scope_path=scope_path,
+            storage_key=storage_key,
+        )
+
+
+@dataclass(slots=True)
+class TemplatePackContextCard:
+    id: str
+    title: str
+    summary: str
+    max_tokens: int
+    referenced_files: list[str] = field(default_factory=list)
+    invariants: list[str] = field(default_factory=list)
+    compatibility: dict[str, Any] = field(default_factory=dict)
+    audience: str = ""
+    status: str = "active"
+    tags: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TemplatePackContextCard":
+        payload = _coerce_dict(data)
+        raw_max_tokens = payload.get("max_tokens", 0)
+        if isinstance(raw_max_tokens, bool):
+            max_tokens = 0
+        else:
+            try:
+                max_tokens = int(raw_max_tokens)
+            except (TypeError, ValueError):
+                max_tokens = 0
+        return cls(
+            id=str(payload.get("id") or ""),
+            title=str(payload.get("title") or ""),
+            summary=str(payload.get("summary") or ""),
+            max_tokens=max_tokens,
+            referenced_files=_coerce_str_list(payload.get("referenced_files")),
+            invariants=_coerce_str_list(payload.get("invariants")),
+            compatibility=_coerce_dict(payload.get("compatibility")),
+            audience=str(payload.get("audience") or ""),
+            status=str(payload.get("status") or "active"),
+            tags=_coerce_str_list(payload.get("tags")),
+        )
+
 
 @dataclass(slots=True)
 class TemplatePackManifestV0:
@@ -43,50 +118,70 @@ class TemplatePackManifestV0:
     version: str
     schema_version: str
     description: str
+    status: str = "stable"
+    owner: dict[str, Any] = field(default_factory=dict)
+    capabilities: list[str] = field(default_factory=list)
+    modules: list[dict[str, Any]] = field(default_factory=list)
+    extension_points: list[dict[str, Any]] = field(default_factory=list)
     stack: dict[str, Any] = field(default_factory=dict)
     required_tools: list[str] = field(default_factory=list)
     artifacts: list[TemplatePackManifestArtifactRef] = field(default_factory=list)
+    artifact_map: dict[str, Any] = field(default_factory=dict)
     allowed_paths: list[str] = field(default_factory=list)
     forbidden_paths: list[str] = field(default_factory=list)
     verification_commands: list[str] = field(default_factory=list)
+    verification: dict[str, Any] = field(default_factory=dict)
+    promotion: dict[str, Any] = field(default_factory=dict)
+    token_profile: dict[str, Any] = field(default_factory=dict)
+    context_cards: list[TemplatePackContextCard] = field(default_factory=list)
     graphify_expectations: dict[str, Any] = field(default_factory=dict)
     guardrails: list[str] = field(default_factory=list)
     review_metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
-        payload["artifacts"] = [asdict(artifact) for artifact in self.artifacts]
+        payload["artifacts"] = [artifact.to_dict() for artifact in self.artifacts]
+        payload["artifact_map"] = self.artifact_map or self._build_artifact_map(self.artifacts)
+        payload["context_cards"] = [card.to_dict() for card in self.context_cards]
         return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TemplatePackManifestV0":
+        payload = _coerce_dict(data)
         return cls(
-            id=str(data.get("id") or ""),
-            name=str(data.get("name") or ""),
-            version=str(data.get("version") or ""),
-            schema_version=str(data.get("schema_version") or BUILTIN_SCHEMA_VERSION),
-            description=str(data.get("description") or ""),
-            stack=dict(data.get("stack") or {}),
-            required_tools=[str(item) for item in data.get("required_tools") or [] if str(item).strip()],
-            artifacts=[
-                TemplatePackManifestArtifactRef(
-                    key=str(item.get("key") or ""),
-                    path=str(item.get("path") or ""),
-                    kind=str(item.get("kind") or "artifact"),
-                    description=str(item.get("description") or ""),
-                    required=bool(item.get("required", True)),
-                    scope_path=item.get("scope_path"),
-                    storage_key=item.get("storage_key"),
-                )
-                for item in data.get("artifacts") or []
-            ],
-            allowed_paths=[str(item) for item in data.get("allowed_paths") or [] if str(item).strip()],
-            forbidden_paths=[str(item) for item in data.get("forbidden_paths") or [] if str(item).strip()],
-            verification_commands=[str(item) for item in data.get("verification_commands") or [] if str(item).strip()],
-            graphify_expectations=dict(data.get("graphify_expectations") or {}),
-            guardrails=[str(item) for item in data.get("guardrails") or [] if str(item).strip()],
-            review_metadata=dict(data.get("review_metadata") or {}),
+            id=str(payload.get("id") or ""),
+            name=str(payload.get("name") or ""),
+            version=str(payload.get("version") or ""),
+            schema_version=str(payload.get("schema_version") or BUILTIN_SCHEMA_VERSION),
+            description=str(payload.get("description") or ""),
+            status=str(payload.get("status") or "stable"),
+            owner=_coerce_dict(payload.get("owner")),
+            capabilities=_coerce_str_list(payload.get("capabilities")),
+            modules=_coerce_dict_list(payload.get("modules")),
+            extension_points=_coerce_dict_list(payload.get("extension_points")),
+            stack=_coerce_dict(payload.get("stack")),
+            required_tools=_coerce_str_list(payload.get("required_tools")),
+            artifacts=[TemplatePackManifestArtifactRef.from_dict(item) for item in _coerce_dict_list(payload.get("artifacts"))],
+            artifact_map=_coerce_dict(payload.get("artifact_map")),
+            allowed_paths=_coerce_str_list(payload.get("allowed_paths")),
+            forbidden_paths=_coerce_str_list(payload.get("forbidden_paths")),
+            verification_commands=_coerce_str_list(payload.get("verification_commands")),
+            verification=_coerce_dict(payload.get("verification")),
+            promotion=_coerce_dict(payload.get("promotion")),
+            token_profile=_coerce_dict(payload.get("token_profile")),
+            context_cards=[TemplatePackContextCard.from_dict(item) for item in _coerce_dict_list(payload.get("context_cards"))],
+            graphify_expectations=_coerce_dict(payload.get("graphify_expectations")),
+            guardrails=_coerce_str_list(payload.get("guardrails")),
+            review_metadata=_coerce_dict(payload.get("review_metadata")),
         )
+
+    @staticmethod
+    def _build_artifact_map(artifacts: list[TemplatePackManifestArtifactRef]) -> dict[str, Any]:
+        return {
+            (artifact.storage_key or artifact.key): artifact.to_dict()
+            for artifact in artifacts
+            if (artifact.storage_key or artifact.key).strip()
+        }
 
 
 @dataclass(slots=True)
@@ -148,12 +243,26 @@ class TemplatePackService:
         manifest = await self._fetch_manifest(pack)
         return manifest.to_dict()
 
+    async def get_template_context_cards(self, template_id: str) -> dict[str, Any] | None:
+        manifest = await self.get_template_manifest(template_id)
+        if not manifest:
+            return None
+        context_cards = list(manifest.get("context_cards") or [])
+        return {
+            "template_id": template_id,
+            "context_card_count": len(context_cards),
+            "token_profile": dict(manifest.get("token_profile") or {}),
+            "context_cards": context_cards,
+        }
+
     async def build_registry_context(self, template_id: str, *, target_path: str | None = None) -> dict[str, Any] | None:
         manifest = await self.get_template_manifest(template_id)
         if not manifest:
             return None
         return {
             "template_manifest": manifest,
+            "token_profile": dict(manifest.get("token_profile") or {}),
+            "context_cards": list(manifest.get("context_cards") or []),
             "verification_commands": list(manifest.get("verification_commands") or []),
             "graphify_expectations": dict(manifest.get("graphify_expectations") or {}),
             "path_guardrails": {
@@ -220,6 +329,7 @@ class TemplatePackService:
                     details={"expected": graphify_expectations},
                 ))
 
+        result.issues.extend(self._validate_context_cards(manifest.get("context_cards") or []))
         result.verification_state = "pass" if not any(issue.field_name == "verification_commands" and issue.severity == "block" for issue in result.issues) else "fail"
         result.graphify_state = "pass" if not any(issue.field_name == "graphify_expectations" and issue.severity == "block" for issue in result.issues) else "fail"
         result.guardrail_state = "pass" if not any(issue.field_name == "path_guardrails" and issue.severity == "block" for issue in result.issues) else "fail"
@@ -421,6 +531,47 @@ class TemplatePackService:
             version=BUILTIN_TEMPLATE_VERSION,
             schema_version=BUILTIN_SCHEMA_VERSION,
             description="Golden registry pack for a SvelteKit + Supabase + Stripe SaaS baseline.",
+            status="stable",
+            owner={
+                "name": "Karkhana",
+                "team": "registry",
+                "domain": "worker",
+            },
+            capabilities=[
+                "template-registry",
+                "context-cards",
+                "verification",
+                "graphify",
+            ],
+            modules=[
+                {
+                    "key": "registry-service",
+                    "path": "backend/app/services/template_pack.py",
+                    "purpose": "Seed, serialize, and validate template packs.",
+                },
+                {
+                    "key": "templates-api",
+                    "path": "backend/app/routers/templates.py",
+                    "purpose": "Expose template pack and context-card APIs.",
+                },
+                {
+                    "key": "worker-boundaries",
+                    "path": "backend/app/services/factory_run.py",
+                    "purpose": "Document control-plane and worker boundaries.",
+                },
+            ],
+            extension_points=[
+                {
+                    "key": "context-cards",
+                    "path": "backend/app/services/template_pack.py",
+                    "purpose": "Curate prompt cards directly in manifest metadata.",
+                },
+                {
+                    "key": "verification-gates",
+                    "path": "backend/app/services/template_pack.py",
+                    "purpose": "Tie validation to pack-level commands and graphify checks.",
+                },
+            ],
             stack={
                 "name": ["SvelteKit", "Supabase", "Stripe"],
                 "package_manager": "pnpm",
@@ -439,6 +590,7 @@ class TemplatePackService:
                 TemplatePackManifestArtifactRef(key="verification", path="backend/app/services/factory_run.py", kind="phase", description="Verification phase artifact."),
                 TemplatePackManifestArtifactRef(key="fixtures", path="backend/tests", kind="fixtures", description="Test fixture artifacts."),
             ],
+            artifact_map={},
             allowed_paths=[
                 "backend/**",
                 "frontend/**",
@@ -459,6 +611,30 @@ class TemplatePackService:
                 "supabase db reset",
                 "graphify update .",
             ],
+            verification={
+                "commands": [
+                    "pnpm install",
+                    "pnpm run check",
+                    "pnpm test",
+                    "supabase db reset",
+                    "graphify update .",
+                ],
+                "graphify": {
+                    "required": True,
+                    "update_command": "graphify update .",
+                },
+            },
+            promotion={
+                "channel": "stable",
+                "requires_review": True,
+                "gates": ["verification", "graphify", "guardrails"],
+            },
+            token_profile={
+                "strategy": "curated",
+                "default_card_tokens": 450,
+                "total_card_tokens": 1350,
+            },
+            context_cards=self._builtin_context_cards(),
             graphify_expectations={
                 "read_before_task": [
                     "graphify-out/GRAPH_REPORT.md",
@@ -495,6 +671,11 @@ class TemplatePackService:
             "channel": pack.channel,
             "display_name": pack.display_name,
             "description": pack.description,
+            "status": manifest_payload.get("status") if manifest_payload else "stable",
+            "owner": dict(manifest_payload.get("owner") or {}) if manifest_payload else {},
+            "capabilities": list(manifest_payload.get("capabilities") or []) if manifest_payload else [],
+            "modules": list(manifest_payload.get("modules") or []) if manifest_payload else [],
+            "extension_points": list(manifest_payload.get("extension_points") or []) if manifest_payload else [],
             "default_stack": pack.default_stack,
             "phases": pack.phases,
             "quality_gates": pack.quality_gates,
@@ -502,12 +683,17 @@ class TemplatePackService:
             "opencode_worker": pack.opencode_worker,
             "required_tools": list(manifest_payload.get("required_tools") or []) if manifest_payload else [],
             "verification_commands": list(manifest_payload.get("verification_commands") or []) if manifest_payload else list((pack.opencode_worker or {}).get("verification_commands") or []),
+            "verification": dict(manifest_payload.get("verification") or {}) if manifest_payload else {},
             "graphify_expectations": dict(manifest_payload.get("graphify_expectations") or {}) if manifest_payload else {},
+            "promotion": dict(manifest_payload.get("promotion") or {}) if manifest_payload else {},
+            "token_profile": dict(manifest_payload.get("token_profile") or {}) if manifest_payload else {},
             "allowed_paths": list(manifest_payload.get("allowed_paths") or []) if manifest_payload else [],
             "forbidden_paths": list(manifest_payload.get("forbidden_paths") or []) if manifest_payload else [],
             "guardrails": list(manifest_payload.get("guardrails") or []) if manifest_payload else list(pack.constraints or []),
             "artifact_refs": list(manifest_payload.get("artifacts") or []) if manifest_payload else [],
+            "artifact_map": dict(manifest_payload.get("artifact_map") or {}) if manifest_payload else {},
             "review_metadata": dict(manifest_payload.get("review_metadata") or {}) if manifest_payload else {},
+            "context_card_count": len(manifest_payload.get("context_cards") or []) if manifest_payload else 0,
             "created_at": to_jsonable(pack.created_at),
             "updated_at": to_jsonable(pack.updated_at),
             "manifest": manifest_payload,
@@ -516,7 +702,7 @@ class TemplatePackService:
     async def _fetch_manifest(self, pack: TemplatePack) -> TemplatePackManifestV0:
         manifest = await self._repo.get_template_manifest(pack.template_id, pack.version)
         if manifest and manifest.metadata_:
-            return TemplatePackManifestV0.from_dict(manifest.metadata_)
+            return self._upgrade_manifest(TemplatePackManifestV0.from_dict(manifest.metadata_), pack)
         fallback = self._manifest_from_pack(pack)
         await self._repo.save_template_manifest(TemplateManifest(
             template_id=pack.template_id,
@@ -543,6 +729,41 @@ class TemplatePackService:
             version=pack.version,
             schema_version=BUILTIN_SCHEMA_VERSION,
             description=pack.description or "",
+            status="stable" if pack.template_id == BUILTIN_TEMPLATE_ID else "compatibility",
+            owner={
+                "name": pack.display_name or pack.template_id,
+                "team": "registry",
+            },
+            capabilities=[
+                "template-registry",
+                "context-cards",
+                "verification",
+                "graphify",
+            ],
+            modules=[
+                {
+                    "key": "registry-service",
+                    "path": "backend/app/services/template_pack.py",
+                    "purpose": "Seed, serialize, and validate template packs.",
+                },
+                {
+                    "key": "templates-api",
+                    "path": "backend/app/routers/templates.py",
+                    "purpose": "Expose template pack and context-card APIs.",
+                },
+            ],
+            extension_points=[
+                {
+                    "key": "context-cards",
+                    "path": "backend/app/services/template_pack.py",
+                    "purpose": "Curate prompt cards directly in manifest metadata.",
+                },
+                {
+                    "key": "verification-gates",
+                    "path": "backend/app/services/template_pack.py",
+                    "purpose": "Tie validation to pack-level commands and graphify checks.",
+                },
+            ],
             stack=stack,
             required_tools=["node", "pnpm"],
             artifacts=[
@@ -550,9 +771,28 @@ class TemplatePackService:
                 TemplatePackManifestArtifactRef(key=SPEC_KEY, path="docs", kind="spec", description="Compatibility spec artifact."),
                 TemplatePackManifestArtifactRef(key=MEMORY_KEY, path="memory", kind="memory", description="Compatibility memory artifact."),
             ],
+            artifact_map={},
             allowed_paths=["backend/**", "frontend/**", "docs/**", "scripts/**", "tests/**"],
             forbidden_paths=[".karkhana/**"],
             verification_commands=verification_commands,
+            verification={
+                "commands": verification_commands,
+                "graphify": {
+                    "required": True,
+                    "update_command": "graphify update .",
+                },
+            },
+            promotion={
+                "channel": pack.channel,
+                "requires_review": True,
+                "gates": ["verification", "graphify", "guardrails"],
+            },
+            token_profile={
+                "strategy": "curated",
+                "default_card_tokens": 450,
+                "total_card_tokens": 1350,
+            },
+            context_cards=self._builtin_context_cards() if pack.template_id == BUILTIN_TEMPLATE_ID else [],
             graphify_expectations={
                 "read_before_task": ["graphify-out/GRAPH_REPORT.md"],
                 "refresh_after_task": ["graphify update ."],
@@ -563,6 +803,149 @@ class TemplatePackService:
             ] + [str(item) for item in (pack.constraints or []) if str(item).strip()],
             review_metadata={"template_id": pack.template_id, "template_version": pack.version},
         )
+
+    def _builtin_context_cards(self) -> list[TemplatePackContextCard]:
+        return [
+            TemplatePackContextCard(
+                id="registry-overview",
+                title="Registry overview",
+                summary="Explains how the TemplatePackService seeds, serializes, and validates the Karkhana registry pack.",
+                max_tokens=450,
+                referenced_files=[
+                    "backend/app/services/template_pack.py",
+                    "backend/app/routers/templates.py",
+                    "backend/app/repository.py",
+                ],
+                invariants=[
+                    "Keep BUILTIN_TEMPLATE_ID stable for compatibility.",
+                    "Store canonical metadata in TemplateManifest.metadata_.",
+                    "Context cards stay inside manifest metadata for MVP.",
+                ],
+                compatibility={
+                    "surface": "registry",
+                    "stack": ["FastAPI", "Pytest", "Graphify"],
+                },
+                audience="backend maintainers",
+                tags=["registry", "manifest", "compatibility"],
+            ),
+            TemplatePackContextCard(
+                id="worker-boundaries",
+                title="Worker boundaries",
+                summary="Describes where the control plane stops and worker-side execution takes over for Karkhana jobs.",
+                max_tokens=450,
+                referenced_files=[
+                    "backend/app/services/factory_run.py",
+                    "backend/app/services/project_twin.py",
+                    "backend/app/services/factory_tracking.py",
+                ],
+                invariants=[
+                    "Heavy execution stays on workers.",
+                    "The backend stays orchestration-first.",
+                    "Registry changes must not depend on worker-app config edits.",
+                ],
+                compatibility={
+                    "surface": "worker",
+                    "stack": ["FastAPI", "Worker bridge"],
+                },
+                audience="platform engineers",
+                tags=["worker", "handoff", "control-plane"],
+            ),
+            TemplatePackContextCard(
+                id="verification-contract",
+                title="Verification contract",
+                summary="Captures the test and graph refresh expectations that keep the builtin pack honest.",
+                max_tokens=450,
+                referenced_files=[
+                    "backend/tests/test_template_pack_service.py",
+                    "backend/tests/test_template_pack_api.py",
+                    "graphify-out/GRAPH_REPORT.md",
+                ],
+                invariants=[
+                    "Verification commands stay explicit in the manifest.",
+                    "Graphify refresh is required after code changes.",
+                    "Invalid context cards must block validation.",
+                ],
+                compatibility={
+                    "surface": "verification",
+                    "stack": ["pytest", "graphify"],
+                },
+                audience="test owners",
+                tags=["verification", "graphify", "tests"],
+            ),
+        ]
+
+    def _upgrade_manifest(self, manifest: TemplatePackManifestV0, pack: TemplatePack) -> TemplatePackManifestV0:
+        if not manifest.status:
+            manifest.status = "stable" if pack.template_id == BUILTIN_TEMPLATE_ID else "compatibility"
+        if not manifest.owner:
+            manifest.owner = {
+                "name": pack.display_name or pack.template_id,
+                "team": "registry",
+            }
+        if not manifest.capabilities:
+            manifest.capabilities = ["template-registry", "context-cards", "verification", "graphify"]
+        if not manifest.modules:
+            manifest.modules = [
+                {
+                    "key": "registry-service",
+                    "path": "backend/app/services/template_pack.py",
+                    "purpose": "Seed, serialize, and validate template packs.",
+                },
+                {
+                    "key": "templates-api",
+                    "path": "backend/app/routers/templates.py",
+                    "purpose": "Expose template pack and context-card APIs.",
+                },
+            ]
+            if pack.template_id == BUILTIN_TEMPLATE_ID:
+                manifest.modules.append(
+                    {
+                        "key": "worker-boundaries",
+                        "path": "backend/app/services/factory_run.py",
+                        "purpose": "Document control-plane and worker boundaries.",
+                    }
+                )
+        if not manifest.extension_points:
+            manifest.extension_points = [
+                {
+                    "key": "context-cards",
+                    "path": "backend/app/services/template_pack.py",
+                    "purpose": "Curate prompt cards directly in manifest metadata.",
+                },
+            ]
+            if pack.template_id == BUILTIN_TEMPLATE_ID:
+                manifest.extension_points.append(
+                    {
+                        "key": "verification-gates",
+                        "path": "backend/app/services/template_pack.py",
+                        "purpose": "Tie validation to pack-level commands and graphify checks.",
+                    }
+                )
+        if not manifest.verification and manifest.verification_commands:
+            manifest.verification = {
+                "commands": list(manifest.verification_commands),
+                "graphify": {
+                    "required": True,
+                    "update_command": "graphify update .",
+                },
+            }
+        if not manifest.promotion:
+            manifest.promotion = {
+                "channel": pack.channel,
+                "requires_review": True,
+                "gates": ["verification", "graphify", "guardrails"],
+            }
+        if not manifest.token_profile:
+            manifest.token_profile = {
+                "strategy": "curated",
+                "default_card_tokens": 450,
+                "total_card_tokens": 1350,
+            }
+        if not manifest.context_cards and pack.template_id == BUILTIN_TEMPLATE_ID:
+            manifest.context_cards = self._builtin_context_cards()
+        if not manifest.artifact_map:
+            manifest.artifact_map = TemplatePackManifestV0._build_artifact_map(manifest.artifacts)
+        return manifest
 
     async def _validate_manifest(self, template_id: str, manifest: dict[str, Any]) -> TemplatePackValidationResult:
         issues: list[TemplatePackValidationIssue] = []
@@ -672,6 +1055,106 @@ class TemplatePackService:
                     severity="block",
                     message=".memory.md requires a short execution-summary / decision-log structure.",
                 ))
+        return issues
+
+    def _validate_context_cards(self, cards: list[dict[str, Any]]) -> list[TemplatePackValidationIssue]:
+        issues: list[TemplatePackValidationIssue] = []
+        if not isinstance(cards, list):
+            return [
+                TemplatePackValidationIssue(
+                    code="context_cards_invalid_type",
+                    field_name="context_cards",
+                    severity="block",
+                    message="Context cards must be provided as a list.",
+                )
+            ]
+
+        for index, card in enumerate(cards):
+            path = f"context_cards[{index}]"
+            if not isinstance(card, dict):
+                issues.append(TemplatePackValidationIssue(
+                    code="context_card_invalid_type",
+                    field_name=path,
+                    severity="block",
+                    message="Context card entries must be objects.",
+                ))
+                continue
+
+            card_id = str(card.get("id") or "").strip()
+            title = str(card.get("title") or "").strip()
+            summary = str(card.get("summary") or "").strip()
+            compatibility = card.get("compatibility")
+            referenced_files = _coerce_str_list(card.get("referenced_files"))
+            invariants = _coerce_str_list(card.get("invariants"))
+
+            if not card_id:
+                issues.append(TemplatePackValidationIssue(
+                    code="context_card_missing_id",
+                    field_name=f"{path}.id",
+                    severity="block",
+                    message="Context card id is required.",
+                ))
+            if not title:
+                issues.append(TemplatePackValidationIssue(
+                    code="context_card_missing_title",
+                    field_name=f"{path}.title",
+                    severity="block",
+                    message="Context card title is required.",
+                ))
+            if not summary:
+                issues.append(TemplatePackValidationIssue(
+                    code="context_card_missing_summary",
+                    field_name=f"{path}.summary",
+                    severity="block",
+                    message="Context card summary is required.",
+                ))
+
+            raw_max_tokens = card.get("max_tokens")
+            if isinstance(raw_max_tokens, bool):
+                max_tokens: int | None = None
+            else:
+                try:
+                    max_tokens = int(raw_max_tokens)
+                except (TypeError, ValueError):
+                    max_tokens = None
+            if max_tokens is None:
+                issues.append(TemplatePackValidationIssue(
+                    code="context_card_missing_max_tokens",
+                    field_name=f"{path}.max_tokens",
+                    severity="block",
+                    message="Context card max_tokens is required.",
+                ))
+            elif max_tokens <= 0:
+                issues.append(TemplatePackValidationIssue(
+                    code="context_card_invalid_max_tokens",
+                    field_name=f"{path}.max_tokens",
+                    severity="block",
+                    message="Context card max_tokens must be positive.",
+                    details={"max_tokens": max_tokens},
+                ))
+
+            if not referenced_files:
+                issues.append(TemplatePackValidationIssue(
+                    code="context_card_missing_referenced_files",
+                    field_name=f"{path}.referenced_files",
+                    severity="block",
+                    message="Context card referenced_files must contain at least one path.",
+                ))
+            if not invariants:
+                issues.append(TemplatePackValidationIssue(
+                    code="context_card_missing_invariants",
+                    field_name=f"{path}.invariants",
+                    severity="block",
+                    message="Context card invariants must contain at least one rule.",
+                ))
+            if not isinstance(compatibility, dict) or not compatibility:
+                issues.append(TemplatePackValidationIssue(
+                    code="context_card_missing_compatibility",
+                    field_name=f"{path}.compatibility",
+                    severity="block",
+                    message="Context card compatibility details are required.",
+                ))
+
         return issues
 
     def _validate_paths(self, manifest: dict[str, Any], changed_files: list[str], *, mode: str) -> list[TemplatePackValidationIssue]:

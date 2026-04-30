@@ -1,10 +1,12 @@
 """Tests for the Build Handoff service."""
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from backend.app.repository import ProjectTwin
 from backend.app.services.build_handoff import BUILD_STEPS, BuildHandoffService
 from backend.app.services.file_manager import FileManager
 
@@ -128,6 +130,102 @@ async def test_mark_step_complete_last_step(db_session, sample_idea, temp_dir):
         assert result["next_step"] is None
 
 
+@pytest.mark.asyncio
+async def test_get_next_actions(db_session, sample_idea, temp_dir):
+    fm = FileManager(base_dir=temp_dir)
+    with patch.object(BuildHandoffService, "__init__", lambda self, **kw: None):
+        service = BuildHandoffService()
+        service.llm = _mock_llm_sync("")
+        service.fm = fm
+        service.memory = _stateful_mock_memory()
+        service.scoring = _mock_scoring_service()
+
+        result = await service.get_next_actions(sample_idea.id)
+        assert result["idea_id"] == sample_idea.id
+        assert result["status_summary"]["current_step"] == BUILD_STEPS[0]
+        assert result["next_actions"]
+        assert result["next_actions"][0]["priority"] == 1
+        assert "codex_prompt" in result["next_actions"][0]
+
+
+@pytest.mark.asyncio
+async def test_get_next_actions_handles_missing_project_twin(db_session, sample_idea, temp_dir):
+    fm = FileManager(base_dir=temp_dir)
+    with patch.object(BuildHandoffService, "__init__", lambda self, **kw: None):
+        service = BuildHandoffService()
+        service.llm = _mock_llm_sync("")
+        service.fm = fm
+        service.memory = _stateful_mock_memory()
+        service.scoring = _mock_scoring_service()
+
+        result = await service.get_next_actions(sample_idea.id)
+        assert result["status_summary"]["project_attached"] is False
+        assert any(action["title"] == "Link the idea to a project twin" for action in result["next_actions"])
+
+
+@pytest.mark.asyncio
+async def test_codex_prompt_uses_plausible_context_files(db_session, sample_idea, temp_dir):
+    fm = FileManager(base_dir=temp_dir)
+    with patch.object(BuildHandoffService, "__init__", lambda self, **kw: None):
+        service = BuildHandoffService()
+        service.llm = _mock_llm_sync("")
+        service.fm = fm
+        service.memory = _stateful_mock_memory()
+        service.scoring = _mock_scoring_service()
+
+        result = await service.get_next_actions(sample_idea.id)
+        prompt = result["next_actions"][0]["codex_prompt"]
+        context_files = _extract_context_files(prompt)
+        repo_root = Path(__file__).resolve().parents[2]
+
+        assert "graphify-out/GRAPH_REPORT.md" in context_files
+        assert "backend/app/services/build_handoff.py" in context_files
+        assert "backend/app/routers/build.py" in context_files
+        assert "backend/app/services/project_twin.py" in context_files
+        assert "frontend/src/lib/components/ProjectTwin/ProjectTwinView.svelte" in context_files
+        assert "frontend/src/lib/api.js" in context_files
+        assert "backend/app/routers/project_twin.py" not in context_files
+        assert "backend/app/routers/workers.py" not in context_files
+
+        for path in context_files:
+            assert (repo_root / path).exists(), f"Missing context file: {path}"
+
+
+@pytest.mark.asyncio
+async def test_codex_prompt_includes_project_twin_context_files(db_session, sample_idea, temp_dir):
+    repo = db_session.repo
+    await repo.save_project_twin(
+        ProjectTwin(
+            idea_id=sample_idea.id,
+            provider="github",
+            installation_id="inst-1",
+            owner="acme",
+            repo="factory-app",
+            repo_full_name="acme/factory-app",
+            repo_url="https://github.com/acme/factory-app",
+            clone_url="https://github.com/acme/factory-app.git",
+            default_branch="main",
+        )
+    )
+
+    fm = FileManager(base_dir=temp_dir)
+    with patch.object(BuildHandoffService, "__init__", lambda self, **kw: None):
+        service = BuildHandoffService()
+        service.llm = _mock_llm_sync("")
+        service.fm = fm
+        service.memory = _stateful_mock_memory()
+        service.scoring = _mock_scoring_service()
+
+        result = await service.get_next_actions(sample_idea.id)
+        prompt = result["next_actions"][0]["codex_prompt"]
+        context_files = _extract_context_files(prompt)
+
+        assert "backend/app/routers/projects.py" in context_files
+        assert "backend/app/routers/worker.py" in context_files
+        assert "backend/app/routers/project_twin.py" not in context_files
+        assert "backend/app/routers/workers.py" not in context_files
+
+
 def _mock_llm_sync(response: str):
     """Create a mock LLM service."""
     from backend.tests.conftest import MockLLMService
@@ -202,3 +300,10 @@ def _mock_scoring_service():
     mock = AsyncMock()
     mock.get_scores = AsyncMock(return_value=[])
     return mock
+
+
+def _extract_context_files(prompt: str) -> list[str]:
+    lines = prompt.splitlines()
+    start = lines.index("Context files to inspect:") + 1
+    end = lines.index("Constraints:")
+    return [line.removeprefix("- ").strip() for line in lines[start:end]]

@@ -137,6 +137,14 @@ Context:
 - quality_gates: {quality_gates}
 - deliverables: {deliverables}
 - graphify_instructions: {graphify_instructions}
+Factory Run Ledger:
+- Context: {ledger_context}
+- Before implementation, use ledger context for continuity, preserve recorded decisions, continue from current_next_action, and avoid repeating resolved debates.
+- For read_only ledgers, use context but do not update the ledger.
+- For required or strict ledgers, update it before completion after meaningful implementation work.
+- Prefer these sections: ## Codex runs, ## Repo changes, ## Verification, ## Risks, ## Next actions, ## Reusable lessons.
+- Do not invent verification results, commit SHAs, or follow-up work. Use pending/not run when unknown.
+- Report ledger_updated and ledger_sections_updated in the final output.
 Output must match schema: {output_schema}""",
         required_inputs=(
             "project",
@@ -153,6 +161,7 @@ Output must match schema: {output_schema}""",
             "deliverables",
             "verification_commands",
             "graphify_instructions",
+            "ledger_context",
             "goal",
         ),
         output_schema=_schema(
@@ -162,6 +171,8 @@ Output must match schema: {output_schema}""",
                 "tests_passed": {"type": "boolean"},
                 "test_output": {"type": "string"},
                 "graphify_updated": {"type": "boolean"},
+                "ledger_updated": {"type": "boolean"},
+                "ledger_sections_updated": {"type": "array", "items": {"type": "string"}},
                 "commit_sha": {"type": "string"},
                 "branch_name": {"type": "string"},
                 "phase_artifacts": {"type": "object"},

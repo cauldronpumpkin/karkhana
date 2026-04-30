@@ -20,11 +20,14 @@ from backend.app.repository import (
     utcnow,
 )
 from backend.app.services.factory_tracking import collect_factory_run_bundle, refresh_factory_run_tracking_manifest
+from backend.app.services.factory_tracking import normalize_token_economy
+from backend.app.services.factory_run_ledger import extract_compact_ledger_context, validate_ledger_metadata
 from backend.app.services.worker_sqs import WorkerSqsPublisher
 
 CLAIMABLE_STATUSES = {"queued", "waiting_for_machine", "failed_retryable"}
 OPEN_JOB_STATUSES = {"queued", "waiting_for_machine", "failed_retryable", "claimed", "running"}
 TERMINAL_STATUSES = {"completed", "cancelled", "failed_terminal"}
+DUPLICATE_WORK_MATCH_STATUSES = OPEN_JOB_STATUSES | {"completed"}
 
 
 def to_jsonable(value: Any) -> Any:
@@ -37,6 +40,32 @@ def to_jsonable(value: Any) -> Any:
     if isinstance(value, list):
         return [to_jsonable(item) for item in value]
     return value
+
+
+def _duplicate_work_keys(item: WorkItem) -> set[str]:
+    payload = item.payload or {}
+    keys = {
+        key
+        for key in (
+            payload.get("duplicate_work_key"),
+            item.idempotency_key,
+            item.dedupe_hash,
+        )
+        if key
+    }
+    return keys
+
+
+def _duplicate_work_detected(item: WorkItem) -> bool:
+    payload = item.payload or {}
+    result = item.result or {}
+    token_economy = result.get("token_economy") if isinstance(result, dict) else {}
+    return bool(
+        payload.get("duplicate_work_detected")
+        or payload.get("duplicate_work_key")
+        or result.get("duplicate_work_detected")
+        or (token_economy.get("duplicate_work_detected") if isinstance(token_economy, dict) else False)
+    )
 
 
 class ProjectTwinService:
@@ -165,27 +194,42 @@ class ProjectTwinService:
         budget: dict[str, Any] | None = None,
         stop_conditions: list[str] | None = None,
         branch_name: str | None = None,
+        ledger_path: str | None = None,
+        ledger_policy: str = "none",
     ) -> WorkItem:
-        item = await get_repository().enqueue_work_item(
-            WorkItem(
-                idea_id=idea_id,
-                project_id=project_id,
-                job_type=job_type,
-                payload=payload or {},
-                idempotency_key=idempotency_key,
-                priority=priority,
-                timeout_seconds=settings.worker_claim_timeout_seconds,
-                factory_run_id=factory_run_id,
-                parent_work_item_id=parent_work_item_id,
-                rationale=rationale,
-                correlation_id=correlation_id,
-                dedupe_hash=dedupe_hash,
-                budget=dict(budget or {}),
-                stop_conditions=list(stop_conditions or []),
-                branch_name=branch_name,
-            )
+        repo = get_repository()
+        ledger_metadata = validate_ledger_metadata(
+            ledger_path=ledger_path,
+            ledger_policy=ledger_policy,
         )
-        project = await get_repository().get_project_twin_by_id(project_id)
+        payload_data = dict(payload or {})
+        effective_factory_run_id = factory_run_id or payload_data.get("factory_run_id")
+        payload_data["factory_run_id"] = effective_factory_run_id
+        payload_data["ledger_policy"] = ledger_metadata["ledger_policy"]
+        payload_data["ledger_path"] = ledger_metadata["ledger_path"]
+        payload_data["ledger_context"] = extract_compact_ledger_context(ledger_metadata["ledger_path"])
+        item = WorkItem(
+            idea_id=idea_id,
+            project_id=project_id,
+            job_type=job_type,
+            payload=payload_data,
+            idempotency_key=idempotency_key,
+            priority=priority,
+            timeout_seconds=settings.worker_claim_timeout_seconds,
+            factory_run_id=effective_factory_run_id,
+            parent_work_item_id=parent_work_item_id,
+            rationale=rationale,
+            correlation_id=correlation_id,
+            dedupe_hash=dedupe_hash,
+            budget=dict(budget or {}),
+            stop_conditions=list(stop_conditions or []),
+            branch_name=branch_name,
+            ledger_path=ledger_metadata["ledger_path"],
+            ledger_policy=ledger_metadata["ledger_policy"],
+        )
+        await self._mark_duplicate_work(item, repo=repo)
+        await repo.save_work_item(item)
+        project = await repo.get_project_twin_by_id(project_id)
         if project:
             await self.sqs_publisher.send_job_available(item, project)
         return item
@@ -249,9 +293,29 @@ class ProjectTwinService:
     async def complete_job(self, job_id: str, claim_token: str, worker_id: str, result: dict[str, Any] | None = None, logs: str = "") -> dict[str, Any]:
         repo = get_repository()
         item = await self._locked_job(job_id, claim_token, worker_id)
-        result = result or {}
+        result = dict(result or {})
         payload = item.payload or {}
         factory_run_id = payload.get("factory_run_id")
+        ledger_sections_updated = result.get("ledger_sections_updated") or []
+        if result.get("ledger_updated"):
+            result["ledger_updated"] = True
+            result["ledger_sections_updated"] = list(ledger_sections_updated)
+        if item.ledger_policy in {"required", "strict"} and not result.get("ledger_updated"):
+            warning = (
+                "factory run ledger must be updated before completion. "
+                "Set ledger_updated=true and ledger_sections_updated in the result."
+            )
+            result["ledger_validation_warnings"] = list(result.get("ledger_validation_warnings") or []) + [warning]
+            if item.ledger_policy == "strict":
+                item.status = "failed_terminal"
+                item.error = warning
+                item.result = result
+                item.logs = self._append_log(item.logs, logs or f"[WARNING] {warning}")
+                item.heartbeat_at = utcnow()
+                await repo.save_work_item(item)
+                await self._refresh_factory_tracking(item)
+                return to_jsonable(item)
+            item.logs = self._append_log(item.logs, f"[WARNING] {warning}")
         if factory_run_id and item.job_type != "repo_index":
             graphify_updated = result.get("graphify_updated", False)
             verification_commands = payload.get("verification_commands") or []
@@ -263,6 +327,12 @@ class ProjectTwinService:
                     "knowledge graph current. Set graphify_updated=true in the result."
                 )
                 item.logs = self._append_log(item.logs, logs_combined)
+        result["token_economy"] = normalize_token_economy(
+            result.get("token_economy"),
+            work_item=item,
+            payload=payload,
+            result=result,
+        )
         item.status = "completed"
         item.result = result
         item.heartbeat_at = utcnow()
@@ -378,3 +448,27 @@ class ProjectTwinService:
         if not factory_run_id:
             return
         await refresh_factory_run_tracking_manifest(get_repository(), factory_run_id)
+
+    async def _mark_duplicate_work(self, item: WorkItem, *, repo: Any) -> None:
+        payload = dict(item.payload or {})
+        candidate_keys = [key for key in (payload.get("duplicate_work_key"), item.idempotency_key, item.dedupe_hash) if key]
+        if not candidate_keys:
+            item.payload = payload
+            return
+
+        existing_items = await repo.list_work_items(
+            idea_id=item.idea_id,
+            statuses=DUPLICATE_WORK_MATCH_STATUSES,
+        )
+        for existing in existing_items:
+            if existing.id == item.id or existing.project_id != item.project_id:
+                continue
+            if _duplicate_work_keys(existing) & set(candidate_keys):
+                payload["duplicate_work_detected"] = True
+                payload.setdefault("duplicate_work_key", next(
+                    key for key in candidate_keys if key in _duplicate_work_keys(existing)
+                ))
+                item.payload = payload
+                return
+
+        item.payload = payload

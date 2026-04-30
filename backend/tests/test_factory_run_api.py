@@ -229,7 +229,7 @@ async def test_create_factory_run_work_item_contract(test_client: AsyncClient, d
     assert payload["template_id"] == "fullstack-saas-v1"
     assert payload["template_manifest"]["id"] == "fullstack-saas-v1"
     assert payload["path_guardrails"]["allowed_paths"]
-    assert payload["resolved_agents_hierarchy"] == []
+    assert [item["key"] for item in payload["resolved_agents_hierarchy"]] == ["AGENTS.md"]
 
     assert len(payload["constraints"]) == 2
     assert payload["constraints"][0]["id"] == "no-secrets"

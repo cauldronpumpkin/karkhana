@@ -79,6 +79,8 @@ pub async fn branch_work<P: AsRef<Path>>(
         tests_passed,
         full_control_used: full_control,
         graphify_updated,
+        ledger_updated: false,
+        ledger_sections_updated: Vec::new(),
     })
 }
 

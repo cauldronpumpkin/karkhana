@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 from backend.app.repository import (
@@ -32,6 +33,7 @@ from backend.app.services.factory_tracking import (
     collect_factory_run_bundle,
     refresh_factory_run_tracking_manifest,
 )
+from backend.app.services.factory_run_ledger import extract_compact_ledger_context, validate_ledger_metadata
 from backend.app.services.template_pack import TemplatePackService
 from backend.app.services.policy_engine import (
     KNOWN_WORKER_CAPABILITIES,
@@ -53,6 +55,60 @@ class FactoryRunService:
         self._policy_engine = PythonPolicyEngine()
         self._template_service = TemplatePackService()
 
+    async def _build_template_context(self, template: TemplatePack, *, target_path: str = ".") -> dict[str, Any]:
+        repo = get_repository()
+        template_docs = await self._collect_template_docs(repo, template.template_id)
+        template_manifest_record = await repo.get_template_manifest(template.template_id, template.version)
+        template_manifest = dict(template_manifest_record.metadata_ or {}) if template_manifest_record and template_manifest_record.metadata_ else {}
+        if not template_manifest.get("id"):
+            template_manifest = {
+                "id": template.template_id,
+                "template_id": template.template_id,
+                "version": template.version,
+                "display_name": template.display_name,
+                "verification_commands": list((template.opencode_worker or {}).get("verification_commands") or []),
+                "graphify_expectations": {
+                    "read_before_task": [
+                        "graphify-out/GRAPH_REPORT.md",
+                        "graphify-out/wiki/index.md",
+                    ],
+                    "refresh_after_task": ["graphify update ."],
+                },
+                "allowed_paths": ["backend/**", "frontend/**", "docs/**", "scripts/**", "tests/**"],
+                "forbidden_paths": [".karkhana/**"],
+                "review_metadata": {"template_id": template.template_id, "template_version": template.version},
+            }
+        verification_commands = list(template_manifest.get("verification_commands") or template.opencode_worker.get("verification_commands") or [])
+        if "graphify update ." not in verification_commands:
+            verification_commands.append("graphify update .")
+        graphify_expectations = dict(template_manifest.get("graphify_expectations") or {
+            "read_before_task": [
+                "graphify-out/GRAPH_REPORT.md",
+                "graphify-out/wiki/index.md",
+            ],
+            "refresh_after_task": ["graphify update ."],
+        })
+        path_guardrails = self._normalize_path_guardrails(
+            {
+                "allowed_paths": template_manifest.get("allowed_paths") or [],
+                "forbidden_paths": template_manifest.get("forbidden_paths") or [],
+            },
+            template_manifest,
+        )
+        resolved_agents = [
+            doc
+            for doc in template_docs
+            if str(doc.get("key") or "").strip() in {"AGENTS.md", "AGENTS.override.md"}
+        ]
+        return {
+            "template_manifest": template_manifest,
+            "verification_commands": verification_commands,
+            "graphify_expectations": graphify_expectations,
+            "path_guardrails": path_guardrails,
+            "resolved_agents": resolved_agents,
+            "review_metadata": dict(template_manifest.get("review_metadata") or {}),
+        }
+
     async def create_factory_run(
         self,
         project_id: str,
@@ -69,7 +125,8 @@ class FactoryRunService:
         template = await repo.get_template_pack(template_id)
         if not template:
             raise ValueError("Template pack not found")
-        template_context = await self._template_service.build_registry_context(template.template_id, target_path=".")
+        template_context = await self._build_template_context(template, target_path=".")
+        code_index = await repo.get_latest_code_index(project.idea_id)
 
         config = dict(config or {})
         intent_record: Intent | None = None
@@ -150,12 +207,26 @@ class FactoryRunService:
                 "review_metadata": dict((template_context or {}).get("review_metadata") or {}),
             }
         path_guardrails = self._normalize_path_guardrails((template_context or {}).get("path_guardrails"), template_manifest)
+        initial_phase_key = self._initial_phase_key(template)
+        scaffold_manifest = self._build_scaffold_manifest(
+            factory_run_id="<pending>",
+            template=template,
+            project_blueprint=to_jsonable(blueprint),
+            template_context=template_context,
+            code_index=code_index,
+            phase_key=initial_phase_key,
+            batch_key=f"{initial_phase_key}-batch-1",
+        )
+
+        ledger_metadata = validate_ledger_metadata(config)
 
         run_config = {
             **config,
             "autonomy_level": autonomy_level,
             "template_version": template.version,
             "template_id": template.template_id,
+            "ledger_policy": ledger_metadata["ledger_policy"],
+            "ledger_path": ledger_metadata["ledger_path"],
             "template_manifest": template_manifest,
             "verification_commands": template_context.get("verification_commands") if template_context else [],
             "graphify_expectations": template_context.get("graphify_expectations") if template_context else {},
@@ -164,6 +235,7 @@ class FactoryRunService:
             "review_metadata": template_context.get("review_metadata") if template_context else {},
             "project_blueprint": to_jsonable(blueprint),
             "policy_result": policy_result.to_dict(),
+            "scaffold_manifest": scaffold_manifest,
         }
         if intent_record:
             run_config["intent_id"] = intent_record.id
@@ -195,6 +267,10 @@ class FactoryRunService:
             budget=dict(intent_record.budget if intent_record else config.get("budget") or {}),
             stop_conditions=list(intent_record.stop_conditions if intent_record else config.get("stop_conditions") or []),
         )
+        if not factory_run.config.get("ledger_path"):
+            default_ledger_path = f"karkhana-runs/{factory_run.id}.md"
+            if Path(default_ledger_path).exists():
+                factory_run.config["ledger_path"] = default_ledger_path
         role_contracts = await self._build_role_contracts(
             project=project,
             template=template,
@@ -284,6 +360,8 @@ class FactoryRunService:
                     budget=dict(factory_run.budget or {}),
                     stop_conditions=list(factory_run.stop_conditions or []),
                     branch_name=f"factory/{factory_run.id[:8]}/{first_phase.phase_key}",
+                    ledger_path=(factory_run.config or {}).get("ledger_path"),
+                    ledger_policy=(factory_run.config or {}).get("ledger_policy", "none"),
                 )
 
                 first_batch.work_item_id = work_item.id
@@ -573,6 +651,399 @@ class FactoryRunService:
             phases.append(phase)
         return phases
 
+    def _initial_phase_key(self, template: TemplatePack) -> str:
+        for phase in template.phases or []:
+            key = str((phase or {}).get("key") or "").strip()
+            if key:
+                return key
+        return "build"
+
+    def _compact_artifact_ref(
+        self,
+        ref: dict[str, Any],
+        *,
+        doc_map: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        key = str(ref.get("key") or ref.get("artifact_key") or "").strip()
+        doc = doc_map.get(key) if doc_map else None
+        compact = {
+            "key": key,
+            "path": str(ref.get("path") or "").strip(),
+            "kind": str(ref.get("kind") or "artifact").strip(),
+            "description": str(ref.get("description") or "").strip(),
+            "required": bool(ref.get("required", True)),
+            "scope_path": ref.get("scope_path"),
+            "storage_key": ref.get("storage_key"),
+        }
+        if doc:
+            compact["uri"] = doc.get("uri")
+            compact["content_type"] = doc.get("content_type")
+        elif ref.get("uri"):
+            compact["uri"] = ref.get("uri")
+        if ref.get("content_type"):
+            compact["content_type"] = ref.get("content_type")
+        return {key: value for key, value in compact.items() if value not in (None, "", [], {})}
+
+    def _compact_context_card(self, ref: dict[str, Any]) -> dict[str, Any]:
+        compact = {
+            "key": str(ref.get("key") or ref.get("artifact_key") or ref.get("path") or ref.get("uri") or "").strip(),
+            "uri": str(ref.get("uri") or ref.get("storage_key") or "").strip(),
+            "content_type": str(ref.get("content_type") or "text/markdown").strip(),
+            "scope_path": ref.get("scope_path") or ref.get("path"),
+            "kind": str(ref.get("kind") or ref.get("artifact_kind") or "context_card").strip(),
+        }
+        if ref.get("description"):
+            compact["description"] = str(ref.get("description") or "").strip()
+        if ref.get("version"):
+            compact["version"] = str(ref.get("version") or "").strip()
+        return {key: value for key, value in compact.items() if value not in (None, "", [], {})}
+
+    def _derive_module_ids(self, project_blueprint: dict[str, Any], context_files: list[dict[str, str]], code_index: Any | None = None) -> list[str]:
+        modules = _copy_list(project_blueprint.get("files_or_modules"))
+        if modules:
+            return list(dict.fromkeys(modules))
+
+        fallback_paths = [entry.get("path", "") for entry in context_files if entry.get("path")]
+        if not fallback_paths and code_index and getattr(code_index, "file_inventory", None):
+            fallback_paths = [entry.get("path", "") for entry in (code_index.file_inventory or []) if entry.get("path")]
+
+        derived: list[str] = []
+        for path in fallback_paths:
+            normalized = str(path or "").strip().strip("/")
+            if not normalized or normalized == ".":
+                continue
+            if "/" in normalized:
+                parts = [part for part in normalized.split("/") if part]
+                if len(parts) >= 2:
+                    derived.append("/".join(parts[:2]))
+                else:
+                    derived.append(parts[0])
+            else:
+                derived.append(normalized)
+        return list(dict.fromkeys(derived))
+
+    def _build_template_asset_refs(
+        self,
+        *,
+        template_manifest: dict[str, Any],
+        template_docs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        doc_map = {
+            str(doc.get("key") or "").strip(): doc
+            for doc in template_docs
+            if str(doc.get("key") or "").strip()
+        }
+        assets = [
+            self._compact_artifact_ref(ref, doc_map=doc_map)
+            for ref in (template_manifest.get("artifacts") or [])
+            if isinstance(ref, dict)
+        ]
+        if not assets:
+            assets = [
+                self._compact_context_card(doc)
+                for doc in template_docs
+            ]
+        return [asset for asset in assets if asset]
+
+    def _build_context_cards(
+        self,
+        *,
+        template_docs: list[dict[str, Any]],
+        resolved_agents_hierarchy: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        source_cards = resolved_agents_hierarchy or template_docs
+        cards = [self._compact_context_card(ref) for ref in source_cards if isinstance(ref, dict)]
+        return [card for card in cards if card]
+
+    def _derive_files_likely_needed(
+        self,
+        *,
+        context_files: list[dict[str, str]],
+        template_assets: list[dict[str, Any]],
+        template_manifest: dict[str, Any],
+    ) -> list[str]:
+        files = [str(entry.get("path") or "").strip() for entry in context_files if str(entry.get("path") or "").strip()]
+        if not files:
+            files = ["graphify-out/GRAPH_REPORT.md"]
+            files.extend(
+                str(asset.get("path") or "").strip()
+                for asset in template_assets
+                if str(asset.get("path") or "").strip()
+            )
+            files.extend(
+                str(path).strip()
+                for path in (template_manifest.get("allowed_paths") or [])[:3]
+                if str(path).strip()
+            )
+        return list(dict.fromkeys(files))
+
+    def _build_graph_context(
+        self,
+        *,
+        project: ProjectTwin,
+        template: TemplatePack,
+        template_context: dict[str, Any] | None,
+        template_manifest: dict[str, Any],
+        code_index: Any | None,
+        context_files: list[dict[str, str]],
+        files_likely_needed: list[str],
+    ) -> dict[str, Any]:
+        graphify_expectations = dict((template_context or {}).get("graphify_expectations") or template_manifest.get("graphify_expectations") or {})
+        graph_context: dict[str, Any] = {
+            "report_path": "graphify-out/GRAPH_REPORT.md",
+            "wiki_index_path": "graphify-out/wiki/index.md",
+            "source": "code_index" if code_index else "template_defaults",
+            "template_id": template.template_id,
+            "template_version": template.version,
+            "graphify_expectations": graphify_expectations,
+            "files_likely_needed": files_likely_needed,
+            "context_file_paths": [entry.get("path") for entry in context_files if entry.get("path")],
+        }
+        if code_index:
+            graph_context.update({
+                "commit_sha": getattr(code_index, "commit_sha", None),
+                "architecture_summary": getattr(code_index, "architecture_summary", ""),
+                "inventory_size": len(getattr(code_index, "file_inventory", []) or []),
+                "manifest_count": len(getattr(code_index, "manifests", []) or []),
+            })
+        else:
+            graph_context.update({
+                "default_allowed_paths": list(template_manifest.get("allowed_paths") or []),
+                "default_forbidden_paths": list(template_manifest.get("forbidden_paths") or []),
+                "project_default_branch": project.default_branch,
+            })
+        return graph_context
+
+    def _build_output_contract(self, output_schema: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "schema_version": "worker_output_contract.v1",
+            "required_fields": list(output_schema.get("required") or []),
+            "property_keys": list((output_schema.get("properties") or {}).keys()),
+        }
+
+    def _build_scaffold_manifest(
+        self,
+        *,
+        factory_run_id: str,
+        template: TemplatePack,
+        project_blueprint: dict[str, Any],
+        template_context: dict[str, Any] | None,
+        code_index: Any | None,
+        phase_key: str,
+        batch_key: str,
+        phase_id: str | None = None,
+        batch_id: str | None = None,
+        task_id: str | None = None,
+        task_type: str | None = None,
+        selected_assets: list[dict[str, Any]] | None = None,
+        files_likely_needed: list[str] | None = None,
+        files_forbidden: list[str] | None = None,
+        module_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        template_manifest = dict((template_context or {}).get("template_manifest") or {})
+        template_docs = []
+        if template_context and template_context.get("resolved_agents"):
+            template_docs = [ref for ref in template_context.get("resolved_agents") or [] if isinstance(ref, dict)]
+        assets = selected_assets or self._build_template_asset_refs(
+            template_manifest=template_manifest,
+            template_docs=template_docs,
+        )
+        manifest = {
+            "schema_version": "v1",
+            "scaffold_mode": "planned",
+            "factory_run_id": factory_run_id,
+            "template_id": template.template_id,
+            "template_version": template.version,
+            "phase_key": phase_key,
+            "batch_key": batch_key,
+            "task_type": task_type or f"factory_phase:{phase_key}",
+            "module_ids": module_ids or self._derive_module_ids(project_blueprint, [], code_index),
+            "selected_assets": assets,
+            "generated_files": [],
+            "file_hashes": {},
+            "files_likely_needed": files_likely_needed or self._derive_files_likely_needed(
+                context_files=[],
+                template_assets=assets,
+                template_manifest=template_manifest,
+            ),
+            "files_forbidden": files_forbidden or self._normalize_path_guardrails(
+                (template_context or {}).get("path_guardrails"),
+                template_manifest,
+            )["forbidden_paths"],
+        }
+        if phase_id:
+            manifest["phase_id"] = phase_id
+            manifest["factory_phase_id"] = phase_id
+        if batch_id:
+            manifest["batch_id"] = batch_id
+            manifest["factory_batch_id"] = batch_id
+        if task_id:
+            manifest["task_id"] = task_id
+        if code_index:
+            manifest["graph_context"] = self._build_graph_context(
+                project=ProjectTwin(
+                    idea_id=str(project_blueprint.get("project_id") or ""),
+                    provider=str(project_blueprint.get("provider") or ""),
+                    installation_id=str(project_blueprint.get("installation_id") or ""),
+                    owner=str(project_blueprint.get("owner") or ""),
+                    repo=str(project_blueprint.get("repo") or ""),
+                    repo_full_name=str(project_blueprint.get("repo_full_name") or ""),
+                    repo_url=str(project_blueprint.get("repo_url") or ""),
+                    clone_url=str(project_blueprint.get("clone_url") or ""),
+                    default_branch=str(project_blueprint.get("default_branch") or "main"),
+                ),
+                template=template,
+                template_context=template_context,
+                template_manifest=template_manifest,
+                code_index=code_index,
+                context_files=[],
+                files_likely_needed=manifest["files_likely_needed"],
+            )
+        else:
+            manifest["graph_context"] = self._build_graph_context(
+                project=ProjectTwin(
+                    idea_id=str(project_blueprint.get("project_id") or ""),
+                    provider=str(project_blueprint.get("provider") or ""),
+                    installation_id=str(project_blueprint.get("installation_id") or ""),
+                    owner=str(project_blueprint.get("owner") or ""),
+                    repo=str(project_blueprint.get("repo") or ""),
+                    repo_full_name=str(project_blueprint.get("repo_full_name") or ""),
+                    repo_url=str(project_blueprint.get("repo_url") or ""),
+                    clone_url=str(project_blueprint.get("clone_url") or ""),
+                    default_branch=str(project_blueprint.get("default_branch") or "main"),
+                ),
+                template=template,
+                template_context=template_context,
+                template_manifest=template_manifest,
+                code_index=None,
+                context_files=[],
+                files_likely_needed=manifest["files_likely_needed"],
+            )
+        manifest["duplicate_work_key"] = self._stable_hash({
+            "factory_run_id": factory_run_id,
+            "phase_id": phase_id or "",
+            "batch_id": batch_id or "",
+            "task_id": task_id or "",
+            "task_type": manifest["task_type"],
+            "template_id": template.template_id,
+            "template_version": template.version,
+            "module_ids": manifest["module_ids"],
+            "files_likely_needed": manifest["files_likely_needed"],
+            "files_forbidden": manifest["files_forbidden"],
+            "selected_assets": [
+                asset.get("key") or asset.get("path") or asset.get("uri") or ""
+                for asset in assets
+            ],
+        })
+        return manifest
+
+    def _build_worker_context_bundle(
+        self,
+        *,
+        project: ProjectTwin,
+        template: TemplatePack,
+        factory_run: FactoryRun,
+        phase: FactoryPhase,
+        batch: FactoryBatch,
+        template_context: dict[str, Any] | None,
+        code_index: Any | None,
+        context_files: list[dict[str, str]],
+        template_docs: list[dict[str, Any]],
+        role_output_schema: dict[str, Any],
+        verification_commands: list[str],
+        project_blueprint: dict[str, Any],
+        template_manifest: dict[str, Any],
+        resolved_agents_hierarchy: list[dict[str, Any]],
+        graphify_instructions: dict[str, list[str]],
+        task_type: str,
+        goal: str,
+    ) -> dict[str, Any]:
+        template_assets = self._build_template_asset_refs(
+            template_manifest=template_manifest,
+            template_docs=template_docs,
+        )
+        likely_files = self._derive_files_likely_needed(
+            context_files=context_files,
+            template_assets=template_assets,
+            template_manifest=template_manifest,
+        )
+        files_forbidden = self._normalize_path_guardrails((factory_run.config or {}).get("path_guardrails"), template_manifest)["forbidden_paths"]
+        module_ids = self._derive_module_ids(project_blueprint, context_files, code_index)
+        context_cards = self._build_context_cards(
+            template_docs=template_docs,
+            resolved_agents_hierarchy=resolved_agents_hierarchy,
+        )
+        graph_context = self._build_graph_context(
+            project=project,
+            template=template,
+            template_context=template_context,
+            template_manifest=template_manifest,
+            code_index=code_index,
+            context_files=context_files,
+            files_likely_needed=likely_files,
+        )
+        output_contract = self._build_output_contract(role_output_schema)
+        bundle = {
+            "schema_version": "v1",
+            "task_id": batch.id,
+            "factory_run_id": factory_run.id,
+            "phase_id": phase.id,
+            "factory_phase_id": phase.id,
+            "phase_key": phase.phase_key,
+            "batch_id": batch.id,
+            "factory_batch_id": batch.id,
+            "batch_key": batch.batch_key,
+            "template_id": template.template_id,
+            "template_version": template.version,
+            "module_ids": module_ids,
+            "task_type": task_type,
+            "graph_context": graph_context,
+            "files_likely_needed": likely_files,
+            "files_forbidden": files_forbidden,
+            "context_cards": context_cards,
+            "template_assets": template_assets,
+            "verification_commands": list(verification_commands),
+            "output_contract": output_contract,
+            "duplicate_work_key": self._stable_hash({
+                "task_id": batch.id,
+                "factory_run_id": factory_run.id,
+                "phase_id": phase.id,
+                "batch_id": batch.id,
+                "phase_key": phase.phase_key,
+                "batch_key": batch.batch_key,
+                "template_id": template.template_id,
+                "template_version": template.version,
+                "module_ids": module_ids,
+                "files_likely_needed": likely_files,
+                "files_forbidden": files_forbidden,
+                "verification_commands": list(verification_commands),
+                "task_type": task_type,
+            }),
+        }
+        ledger_path = (factory_run.config or {}).get("ledger_path")
+        bundle["ledger_path"] = ledger_path
+        bundle["ledger_policy"] = (factory_run.config or {}).get("ledger_policy", "none")
+        bundle["ledger_context"] = extract_compact_ledger_context(ledger_path)
+        scaffold_manifest = self._build_scaffold_manifest(
+            factory_run_id=factory_run.id,
+            template=template,
+            project_blueprint=project_blueprint,
+            template_context=template_context,
+            code_index=code_index,
+            phase_key=phase.phase_key,
+            batch_key=batch.batch_key,
+            phase_id=phase.id,
+            batch_id=batch.id,
+            task_id=batch.id,
+            task_type=task_type,
+            selected_assets=template_assets,
+            files_likely_needed=likely_files,
+            files_forbidden=files_forbidden,
+            module_ids=module_ids,
+        )
+        bundle["scaffold_manifest"] = scaffold_manifest
+        return bundle
+
     async def _build_worker_contract(
         self,
         project: ProjectTwin,
@@ -634,6 +1105,27 @@ class FactoryRunService:
                 "Run 'graphify update .' after all code changes to keep the knowledge graph current",
             ],
         }
+        worker_context_bundle = self._build_worker_context_bundle(
+            project=project,
+            template=template,
+            factory_run=factory_run,
+            phase=phase,
+            batch=batch,
+            template_context=template_context,
+            code_index=code_index,
+            context_files=context_files,
+            template_docs=template_docs,
+            role_output_schema=RolePromptBuilder.definition(FactoryRole.WORKER).output_schema,
+            verification_commands=verification_commands,
+            project_blueprint=project_blueprint,
+            template_manifest=template_manifest,
+            resolved_agents_hierarchy=resolved_agents_hierarchy,
+            graphify_instructions=graphify_instructions,
+            task_type=f"factory_phase:{phase.phase_key}",
+            goal=opencode_worker.get("goal") or f"Execute factory phase '{phase.phase_key}' for project {project.repo_full_name}",
+        )
+        output_contract = worker_context_bundle["output_contract"]
+        scaffold_manifest = worker_context_bundle["scaffold_manifest"]
         role_context = {
             "project": to_jsonable(project),
             "template": to_jsonable(template),
@@ -649,6 +1141,7 @@ class FactoryRunService:
             "deliverables": deliverables,
             "verification_commands": verification_commands,
             "graphify_instructions": graphify_instructions,
+            "ledger_context": worker_context_bundle.get("ledger_context") or {},
             "template_manifest": template_manifest,
             "template_version": template.version,
             "template_id": template.template_id,
@@ -661,6 +1154,9 @@ class FactoryRunService:
             "budget": dict(factory_run.budget or {}),
             "stop_conditions": list(factory_run.stop_conditions or []),
             "goal": opencode_worker.get("goal") or f"Execute factory phase '{phase.phase_key}' for project {project.repo_full_name}",
+            "worker_context_bundle": worker_context_bundle,
+            "output_contract": output_contract,
+            "scaffold_manifest": scaffold_manifest,
         }
         role_prompt = RolePromptBuilder.build(FactoryRole.WORKER, role_context)
         verifier_contract = RolePromptBuilder.build(
@@ -685,6 +1181,8 @@ class FactoryRunService:
             "role_model": role_prompt["model"],
             "messages": role_prompt["messages"],
             "prompt": role_prompt["prompt"],
+            "task_id": batch.id,
+            "task_type": f"factory_phase:{phase.phase_key}",
             "factory_run_id": factory_run.id,
             "factory_phase_id": phase.id,
             "factory_batch_id": batch.id,
@@ -729,6 +1227,9 @@ class FactoryRunService:
             "path_guardrails": path_guardrails,
             "resolved_agents_hierarchy": resolved_agents_hierarchy,
             "response_schema": role_prompt["output_schema"],
+            "output_contract": output_contract,
+            "worker_context_bundle": worker_context_bundle,
+            "scaffold_manifest": scaffold_manifest,
             "verifier_contract": verifier_contract,
         }
 

@@ -31,6 +31,45 @@ BUILD_STEP_DESCRIPTIONS = {
 }
 
 
+def _safe_repo_path() -> str:
+    return "<repo-root>"
+
+
+def _build_context_files(project: Any | None) -> list[str]:
+    context_files = [
+        "graphify-out/GRAPH_REPORT.md",
+        "backend/app/services/build_handoff.py",
+        "backend/app/routers/build.py",
+        "backend/app/services/project_twin.py",
+        "frontend/src/lib/components/ProjectTwin/ProjectTwinView.svelte",
+        "frontend/src/lib/api.js",
+    ]
+    if project:
+        context_files.extend([
+            "backend/app/routers/projects.py",
+            "backend/app/routers/worker.py",
+        ])
+    return context_files
+
+
+def _codex_prompt(goal: str, context_files: list[str], constraints: list[str], deliverables: list[str], verification_commands: list[str]) -> str:
+    lines = [
+        f"Goal: {goal}",
+        f"Repo path: {_safe_repo_path()}",
+        "Context files to inspect:",
+        *[f"- {path}" for path in context_files],
+        "Constraints:",
+        *[f"- {item}" for item in constraints],
+        "Deliverables:",
+        *[f"- {item}" for item in deliverables],
+        "Verification commands:",
+        *[f"- {cmd}" for cmd in verification_commands],
+        "Run graphify update . after code changes.",
+        "Final response format: concise summary, files changed, tests run, and any follow-ups.",
+    ]
+    return "\n".join(lines)
+
+
 class BuildHandoffService:
     """Service for generating Prometheus build handoff prompts and tracking build progress."""
 
@@ -277,6 +316,70 @@ class BuildHandoffService:
             "remaining_steps": remaining_steps,
             "total_steps": len(BUILD_STEPS),
             "progress": f"{len(completed_steps)}/{len(BUILD_STEPS)}",
+        }
+
+    async def get_next_actions(self, idea_id: str) -> dict[str, Any]:
+        idea = await self._get_idea(idea_id)
+        project = await get_repository().get_project_twin(idea_id)
+        state = await self.get_current_build_state(idea_id)
+        remaining = state["remaining_steps"]
+        latest_step = remaining[0] if remaining else None
+        scores = []
+        try:
+            scores = await self.scoring.get_scores(idea.id)
+        except Exception:
+            scores = []
+
+        actions: list[dict[str, Any]] = []
+        context_files = _build_context_files(project)
+
+        actions.append({
+            "title": "Advance the next build step",
+            "reason": f"Current step is {state['current_step']}; next up is {latest_step or 'completion' }.",
+            "priority": 1,
+            "suggested_owner": "local-worker",
+            "codex_prompt": _codex_prompt(
+                goal=f"Complete the next build step for {idea.title}",
+                context_files=context_files,
+                constraints=[
+                    "Keep worker execution separate from the web/backend control plane.",
+                    "Do not introduce a new database.",
+                    "Preserve existing API compatibility unless absolutely necessary.",
+                ],
+                deliverables=[
+                    "Implement the next build step with minimal localized changes.",
+                    "Update or add tests for the step.",
+                ],
+                verification_commands=["python -m pytest backend/tests", "graphify update ."],
+            ),
+        })
+
+        if not project:
+            actions.append({
+                "title": "Link the idea to a project twin",
+                "reason": "No project twin is attached yet, so build coordination is limited.",
+                "priority": 2,
+                "suggested_owner": "backend",
+            })
+
+        if not scores:
+            actions.append({
+                "title": "Review scoring and research context",
+                "reason": "No scored dimensions are available to prioritize the build.",
+                "priority": 3,
+                "suggested_owner": "product",
+            })
+
+        return {
+            "idea_id": idea_id,
+            "status_summary": {
+                "idea_title": idea.title,
+                "current_phase": idea.current_phase,
+                "current_step": state["current_step"],
+                "remaining_steps": remaining,
+                "project_attached": bool(project),
+            },
+            "next_actions": actions,
         }
 
     async def mark_step_complete(self, idea_id: str, step: str) -> dict[str, Any]:

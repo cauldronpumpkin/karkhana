@@ -283,6 +283,10 @@ pub struct BranchWorkResult {
     pub full_control_used: bool,
     #[serde(default)]
     pub graphify_updated: bool,
+    #[serde(default)]
+    pub ledger_updated: bool,
+    #[serde(default)]
+    pub ledger_sections_updated: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

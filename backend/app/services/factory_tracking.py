@@ -28,6 +28,34 @@ GRAPHIFY_POST_TASK = [
     "Run 'graphify update .' after all code changes to keep the knowledge graph current",
 ]
 
+TOKEN_ECONOMY_NUMERIC_FIELDS = (
+    "input_tokens_total",
+    "input_tokens_cached",
+    "cache_write_tokens",
+    "output_tokens",
+    "reasoning_tokens",
+    "context_bundle_tokens",
+    "tool_result_tokens",
+    "tool_calls_count",
+    "files_read_count",
+    "files_modified_count",
+    "template_assets_used",
+    "context_cards_used",
+    "boilerplate_avoided_estimate_tokens",
+    "cost_estimate_usd",
+    "latency_ms",
+)
+
+TOKEN_ECONOMY_FIELDS = (
+    "worker_run_id",
+    "provider",
+    "model",
+    *TOKEN_ECONOMY_NUMERIC_FIELDS,
+    "duplicate_work_detected",
+    "cache_hit_rate",
+    "success",
+)
+
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
@@ -36,6 +64,122 @@ def _iso(value: datetime | None) -> str | None:
 def _status_counter(items: list[Any], key: str = "status") -> dict[str, int]:
     counter = Counter((getattr(item, key, None) or "unknown") for item in items)
     return dict(sorted(counter.items()))
+
+
+def _coerce_int(value: Any, default: int = 0) -> int:
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_float(value: Any, default: float = 0.0) -> float:
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off", ""}:
+            return False
+    return default
+
+
+def normalize_token_economy(
+    telemetry: dict[str, Any] | None = None,
+    *,
+    work_item: WorkItem | None = None,
+    payload: dict[str, Any] | None = None,
+    result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    source = dict(telemetry or {})
+    payload = payload or {}
+    result = result or {}
+    normalized: dict[str, Any] = {
+        "worker_run_id": source.get("worker_run_id") or result.get("worker_run_id") or payload.get("worker_run_id"),
+        "provider": source.get("provider") or result.get("provider") or payload.get("provider"),
+        "model": source.get("model") or result.get("model") or payload.get("model"),
+        "duplicate_work_detected": _coerce_bool(
+            source.get("duplicate_work_detected"),
+            default=False,
+        )
+        or _coerce_bool(result.get("duplicate_work_detected"), default=False)
+        or _coerce_bool(payload.get("duplicate_work_detected"), default=False)
+        or bool(payload.get("duplicate_work_key")),
+        "success": _coerce_bool(
+            source.get("success"),
+            default=work_item.status == "completed" if work_item else False,
+        )
+        if source.get("success") is not None
+        else _coerce_bool(
+            result.get("success"),
+            default=work_item.status == "completed" if work_item else False,
+        )
+        if result.get("success") is not None
+        else _coerce_bool(payload.get("success"), default=work_item.status == "completed" if work_item else False),
+    }
+    for field in TOKEN_ECONOMY_NUMERIC_FIELDS:
+        if field == "cost_estimate_usd":
+            normalized[field] = _coerce_float(source.get(field), default=0.0)
+        else:
+            normalized[field] = _coerce_int(source.get(field), default=0)
+    cache_hit_rate = source.get("cache_hit_rate")
+    if cache_hit_rate is None:
+        input_tokens_total = normalized["input_tokens_total"]
+        input_tokens_cached = normalized["input_tokens_cached"]
+        if input_tokens_total > 0:
+            cache_hit_rate = input_tokens_cached / input_tokens_total
+    normalized["cache_hit_rate"] = _coerce_float(cache_hit_rate, default=0.0)
+    return normalized
+
+
+def summarize_token_economy(work_items: list[WorkItem]) -> tuple[dict[str, Any], int]:
+    totals: dict[str, Any] = {field: 0 for field in TOKEN_ECONOMY_NUMERIC_FIELDS}
+    totals["work_item_count"] = len(work_items)
+    totals["token_economy_work_item_count"] = 0
+    totals["success_count"] = 0
+    duplicate_work_count = 0
+    for item in work_items:
+        result = item.result or {}
+        telemetry = result.get("token_economy") if isinstance(result, dict) else None
+        normalized = normalize_token_economy(
+            telemetry if isinstance(telemetry, dict) else None,
+            work_item=item,
+            payload=item.payload,
+            result=result,
+        )
+        if telemetry is not None:
+            totals["token_economy_work_item_count"] += 1
+        for field in TOKEN_ECONOMY_NUMERIC_FIELDS:
+            if field == "cost_estimate_usd":
+                totals[field] += _coerce_float(normalized.get(field), default=0.0)
+            else:
+                totals[field] += _coerce_int(normalized.get(field), default=0)
+        if normalized["success"]:
+            totals["success_count"] += 1
+        if normalized["duplicate_work_detected"]:
+            duplicate_work_count += 1
+    totals["cache_hit_rate"] = (
+        totals["input_tokens_cached"] / totals["input_tokens_total"]
+        if totals["input_tokens_total"]
+        else 0.0
+    )
+    return totals, duplicate_work_count
 
 
 def _work_item_status(batch: FactoryBatch, work_items: dict[str, WorkItem]) -> str:
@@ -191,6 +335,7 @@ def build_tracking_manifest(
     queue_counts = _status_counter(work_items)
     active_work_items = [item for item in work_items if item.status in {"queued", "waiting_for_machine", "failed_retryable", "claimed", "running"}]
     latest_work_item = sorted(work_items, key=lambda item: item.updated_at)[-1] if work_items else None
+    token_economy_totals, duplicate_work_count = summarize_token_economy(work_items)
     worker_queue_state = {
         "status": latest_work_item.status if latest_work_item else run.status,
         "queued": queue_counts.get("queued", 0) + queue_counts.get("waiting_for_machine", 0),
@@ -249,6 +394,8 @@ def build_tracking_manifest(
                 if batch.output_uri
             },
         },
+        token_economy_totals=token_economy_totals,
+        duplicate_work_count=duplicate_work_count,
         snapshot_uri=snapshot_uri,
         completed_at=run.completed_at,
     )
@@ -280,6 +427,8 @@ def build_tracking_summary(manifest: FactoryRunTrackingManifest) -> dict[str, An
         "graphify_status": manifest.graphify_status,
         "verification_state": manifest.verification_state,
         "worker_queue_state": manifest.worker_queue_state,
+        "token_economy_totals": manifest.token_economy_totals,
+        "duplicate_work_count": manifest.duplicate_work_count,
         "last_indexed_commit": manifest.last_indexed_commit,
         "tracking_manifest_uri": manifest.snapshot_uri,
         "updated_at": manifest.updated_at.isoformat() if manifest.updated_at else None,

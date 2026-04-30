@@ -28,6 +28,17 @@ async def _seed_broken_template(repo: InMemoryRepository) -> None:
                 "stack": {},
                 "required_tools": [],
                 "artifacts": [],
+                "context_cards": [
+                    {
+                        "id": "broken-card",
+                        "title": "",
+                        "summary": "",
+                        "max_tokens": 0,
+                        "referenced_files": [],
+                        "invariants": [],
+                        "compatibility": {},
+                    }
+                ],
                 "allowed_paths": [],
                 "forbidden_paths": [],
                 "verification_commands": [],
@@ -52,8 +63,12 @@ async def test_template_pack_service_seeds_builtin_pack_and_exposes_manifest() -
     assert pack["template_id"] == BUILTIN_TEMPLATE_ID
     assert pack["manifest"]["schema_version"] == "v0"
     assert pack["required_tools"] == ["node", "pnpm", "supabase", "stripe"]
+    assert pack["status"] == "stable"
+    assert pack["context_card_count"] == 3
+    assert pack["token_profile"]["strategy"] == "curated"
     assert "AGENTS.md" in [ref["key"] for ref in pack["artifact_refs"]]
     assert MEMORY_KEY in [ref["key"] for ref in pack["artifact_refs"]]
+    assert len(pack["manifest"]["context_cards"]) == 3
 
 
 @pytest.mark.asyncio
@@ -119,3 +134,21 @@ async def test_template_pack_service_validate_template_reports_missing_fields() 
     assert "missing_name" in codes
     assert "missing_required_tools" in codes
     assert "missing_artifacts" in codes
+
+
+@pytest.mark.asyncio
+async def test_template_pack_service_validate_template_reports_invalid_context_cards() -> None:
+    repo = InMemoryRepository()
+    set_repository(repo)
+    await _seed_broken_template(repo)
+    service = TemplatePackService(repo=repo)
+
+    result = await service.validate_template("broken-template")
+
+    assert result["valid"] is False
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "context_card_missing_title" in codes
+    assert "context_card_invalid_max_tokens" in codes
+    assert "context_card_missing_referenced_files" in codes
+    assert "context_card_missing_invariants" in codes
+    assert "context_card_missing_compatibility" in codes

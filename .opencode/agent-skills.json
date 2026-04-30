@@ -1,0 +1,251 @@
+{
+  "$schema": "agent-skills/v1",
+  "description": "Skill-aware agent routing config. Maps task patterns to subagent + skill combos.",
+
+  "skills": {
+    "fastapi-expert": {
+      "triggers": ["fastapi", "pydantic", "async python", "python api", "rest api python", "sqlalchemy async", "jwt authentication python", "swagger python", "openapi python", "python endpoint", "uvicorn", "starlette"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "nextjs-developer": {
+      "triggers": ["next.js", "nextjs", "app router", "server component", "server action", "use server", "rsc", "generate metadata", "loading.tsx", "error.tsx", "vercel", "streaming ssr", "route handler"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "python-pro": {
+      "triggers": ["python", "pytest", "mypy", "dataclass", "type hints", "asyncio", "python test", "pip", "virtualenv", "pyproject.toml", "ruff", "black formatter"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "typescript-pro": {
+      "triggers": ["typescript", "tsc", "trpc", "generics ts", "discriminated union", "mapped type", "conditional type", "branded type", "type guard", "monorepo typescript"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "javascript-pro": {
+      "triggers": ["javascript", "es2023", "esm", "node.js", "web worker", "fetch api", "promise", "async await js", ".mjs", ".cjs", "npm package"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "nestjs-expert": {
+      "triggers": ["nestjs", "nest.js", "module.ts", "controller.ts", "service.ts", "typeorm", "prisma", "guard nestjs", "interceptor nestjs", "dto nestjs", "dependency injection nestjs"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "react-native-expert": {
+      "triggers": ["react native", "expo", "flatlist", "safearea", "native module", "ios android", "mobile app", "app.json expo"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "golang-pro": {
+      "triggers": ["golang", "go lang", "goroutine", "channel go", "grpc", "go test", "pprof", "go mod", "cobra cli", "buf connect"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "rust-engineer": {
+      "triggers": ["rust", "cargo", "ownership rust", "borrowing", "lifetime", "tokio", "async rust", "trait rust", "ffi", "unsafe rust", "serde"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "api-designer": {
+      "triggers": ["api design", "rest api", "graphql schema", "openapi spec", "swagger", "endpoint design", "pagination api", "versioning api", "error handling api"],
+      "subagent": "architect-premium",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "architecture-designer": {
+      "triggers": ["architecture", "system design", "adr", "architecture decision", "scalability", "component diagram", "microservices design", "service boundary"],
+      "subagent": "architect-premium",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "microservices-architect": {
+      "triggers": ["microservice", "saga pattern", "event sourcing", "cqrs", "service mesh", "distributed tracing", "bounded context", "ddd", "service decomposition"],
+      "subagent": "architect-premium",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "fullstack-guardian": {
+      "triggers": ["full-stack", "fullstack", "frontend backend", "crud ui", "end-to-end feature", "authenticated route", "form api", "monorepo feature"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "security-reviewer": {
+      "triggers": ["security", "vulnerability", "sast", "penetration test", "devsecops", "compliance", "secrets scanning", "sql injection", "xss", "csrf", "owasp"],
+      "subagent": "review-cheap",
+      "review_subagent": "code-goblin",
+      "escalation_subagent": "architect-premium"
+    },
+    "code-reviewer": {
+      "triggers": ["code review", "pr review", "code quality", "refactor", "n+1 query", "code smell", "pull request review"],
+      "subagent": "review-cheap",
+      "review_subagent": "code-goblin",
+      "escalation_subagent": "architect-premium"
+    },
+    "code-documenter": {
+      "triggers": ["documentation", "docstring", "jsdoc", "openapi spec", "swagger doc", "readme", "user guide", "tutorial", "api docs"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "test-master": {
+      "triggers": ["unit test", "integration test", "e2e test", "test strategy", "coverage", "flaky test", "qa", "test automation", "playwright test", "k6 load test"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "playwright-expert": {
+      "triggers": ["playwright", "e2e", "browser test", "visual regression", "page object", "test flakiness", "ui automation"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "debugging-wizard": {
+      "triggers": ["debug", "error trace", "stack trace", "root cause", "crash", "exception", "failure analysis", "bug fix", "troubleshoot"],
+      "subagent": "explore-cheap",
+      "review_subagent": "code-goblin",
+      "escalation_subagent": "staff-engineer"
+    },
+    "database-optimizer": {
+      "triggers": ["slow query", "database performance", "query optimization", "index design", "partition", "lock contention", "explain analyze", "vacuum"],
+      "subagent": "explore-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "staff-engineer"
+    },
+    "sql-pro": {
+      "triggers": ["sql", "complex query", "window function", "cte", "recursive query", "join optimization", "schema design", "database migration", "mysql", "postgres query"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "postgres-pro": {
+      "triggers": ["postgres", "postgresql", "jsonb", "pg extension", "replication postgres", "vacuum postgres", "pg stats"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "staff-engineer"
+    },
+    "devops-engineer": {
+      "triggers": ["dockerfile", "ci/cd", "pipeline", "github actions", "kubernetes deploy", "terraform", "gitops", "infrastructure as code", "incident response", "runbook"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "kubernetes-specialist": {
+      "triggers": ["kubernetes", "k8s", "helm chart", "pod", "deployment yaml", "service account", "network policy", "rbac", "ingress", "pv pvc"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "cloud-architect": {
+      "triggers": ["aws", "azure", "gcp", "cloud architecture", "migration plan", "landing zone", "well-architected", "cost optimization cloud", "disaster recovery"],
+      "subagent": "architect-premium",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "terraform-engineer": {
+      "triggers": ["terraform", "iac", "tfstate", "terraform module", "terraform import", "terraform plan", "terraform apply"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "monitoring-expert": {
+      "triggers": ["monitoring", "prometheus", "grafana", "alerting", "distributed tracing", "observability", "load test", "capacity planning", "profiling"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "ml-pipeline": {
+      "triggers": ["ml pipeline", "mlflow", "kubeflow", "airflow", "feature store", "model registry", "mlops", "training pipeline", "dvc", "experiment tracking"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "pandas-pro": {
+      "triggers": ["pandas", "dataframe", "data cleaning", "groupby", "pivot table", "merge dataframe", "resample", "nan values", "data aggregation"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "websocket-engineer": {
+      "triggers": ["websocket", "socket.io", "real-time", "bidirectional messaging", "presence tracking", "room management", "redis pub/sub"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "prompt-engineer": {
+      "triggers": ["prompt", "llm prompt", "chain-of-thought", "few-shot", "system prompt", "prompt template", "function calling", "structured output llm"],
+      "subagent": "architect-premium",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "feature-forge": {
+      "triggers": ["requirements", "user story", "acceptance criteria", "feature spec", "prd", "ears format", "functional requirement"],
+      "subagent": "architect-premium",
+      "review_subagent": "code-goblin",
+      "escalation_subagent": "architect-premium"
+    },
+    "cli-developer": {
+      "triggers": ["cli tool", "command line", "argument parsing", "shell completion", "progress bar", "spinner", "typer", "click", "commander", "cobra"],
+      "subagent": "coder-cheap",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    },
+    "the-fool": {
+      "triggers": ["devil's advocate", "pre-mortem", "red team", "challenge", "assumption audit", "stress test plan"],
+      "subagent": "code-goblin",
+      "review_subagent": "review-cheap",
+      "escalation_subagent": "architect-premium"
+    }
+  },
+
+  "routing_rules": [
+    {
+      "rule": "If task mentions debugging/error/crash/trace → use debugging-wizard skill with explore-cheap, escalate to staff-engineer",
+      "skill": "debugging-wizard",
+      "subagent": "explore-cheap",
+      "escalation": "staff-engineer"
+    },
+    {
+      "rule": "If task mentions architecture/design/system → use architecture-designer skill with architect-premium",
+      "skill": "architecture-designer",
+      "subagent": "architect-premium",
+      "escalation": "architect-premium"
+    },
+    {
+      "rule": "If task mentions security/vulnerability/audit → use security-reviewer skill with review-cheap, stress-test with code-goblin",
+      "skill": "security-reviewer",
+      "subagent": "review-cheap",
+      "escalation": "architect-premium"
+    },
+    {
+      "rule": "If task mentions testing/test/coverage → use test-master skill with coder-cheap",
+      "skill": "test-master",
+      "subagent": "coder-cheap",
+      "escalation": "architect-premium"
+    },
+    {
+      "rule": "If task mentions review/quality/pr → use code-reviewer skill with review-cheap",
+      "skill": "code-reviewer",
+      "subagent": "review-cheap",
+      "escalation": "architect-premium"
+    }
+  ],
+
+  "fallback": {
+    "subagent": "coder-cheap",
+    "skill": null,
+    "review_subagent": "review-cheap",
+    "escalation_subagent": "architect-premium"
+  }
+}

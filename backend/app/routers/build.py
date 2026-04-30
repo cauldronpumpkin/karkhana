@@ -52,6 +52,18 @@ async def get_current_step(idea_id: str):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@router.get("/{idea_id}/build/next-actions")
+async def get_next_actions(idea_id: str):
+    """Get deterministic next actions for the current idea."""
+    try:
+        service = get_service()
+        return await service.get_next_actions(idea_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @router.post("/{idea_id}/build/step-complete")
 async def mark_step_complete(idea_id: str, body: StepCompleteRequest):
     """Mark a build step as complete and get the next step prompt."""

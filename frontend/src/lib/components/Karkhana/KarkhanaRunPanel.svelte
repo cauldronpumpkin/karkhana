@@ -64,6 +64,28 @@
   let queuedWork = $derived(batches.filter((b) => b.status === 'queued').length);
   let runningWork = $derived(batches.filter((b) => ['running', 'in_progress'].includes(b.status)).length);
   let completedWork = $derived(batches.filter((b) => b.status === 'completed').length);
+  let tokenEconomy = $derived(extractTokenEconomy(trackingSummary, trackingManifest));
+  let duplicateWork = $derived(extractDuplicateWork(trackingSummary, trackingManifest, tokenEconomy));
+  let economyAssets = $derived(extractListMetric(tokenEconomy, ['template_assets_used', 'template_assets', 'assets_used', 'asset_refs']));
+  let economyContextCards = $derived(extractListMetric(tokenEconomy, ['context_cards_used', 'context_cards', 'context_card_refs']));
+  let economyInputTokens = $derived(readMetric(tokenEconomy, ['input_tokens_total', 'input_tokens', 'input_token_count', 'prompt_tokens', 'total_input_tokens']));
+  let economyOutputTokens = $derived(readMetric(tokenEconomy, ['output_tokens', 'output_token_count', 'completion_tokens', 'total_output_tokens']));
+  let economyCachedTokens = $derived(readMetric(tokenEconomy, ['input_tokens_cached', 'cached_tokens', 'cache_hit_tokens', 'cached_input_tokens']));
+  let economyCacheRate = $derived(readMetric(tokenEconomy, ['cache_hit_rate', 'cache_hit_rate_pct', 'cache_hit_ratio']));
+  let economyCostEstimate = $derived(readMetric(tokenEconomy, ['cost_estimate_usd', 'cost_estimate', 'estimated_cost', 'estimated_cost_usd', 'cost_usd']));
+  let duplicateWorkCount = $derived(readMetric(duplicateWork, ['count', 'duplicate_count', 'duplicate_work_count']));
+  let duplicateWorkStatus = $derived(readMetric(duplicateWork, ['status', 'state']));
+  let hasTokenTelemetry = $derived(
+    economyInputTokens !== null ||
+      economyOutputTokens !== null ||
+      economyCachedTokens !== null ||
+      economyCacheRate !== null ||
+      economyCostEstimate !== null ||
+      economyAssets.length > 0 ||
+      economyContextCards.length > 0 ||
+      duplicateWorkCount !== null ||
+      duplicateWorkStatus !== null
+  );
 
   let isSuggestOnly = $derived(autonomyLevel === 'suggest_only');
   let isFullAutopilot = $derived(autonomyLevel === 'full_autopilot');
@@ -167,6 +189,114 @@
 
   function shortId(value) {
     return value ? value.slice(0, 12) : 'n/a';
+  }
+
+  function asList(value) {
+    return Array.isArray(value) ? value.filter((item) => item !== null && item !== undefined && `${item}`.trim() !== '') : [];
+  }
+
+  function pickFirst(...values) {
+    for (const value of values) {
+      if (Array.isArray(value) && value.length) return value;
+      if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length) return value;
+      if (typeof value === 'string' && value.trim()) return value;
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+      if (typeof value === 'boolean') return value;
+    }
+    return null;
+  }
+
+  function findNested(source, keyPaths) {
+    const roots = [source, source?.token_economy, source?.token_telemetry, source?.telemetry, source?.metrics, source?.summary];
+    for (const root of roots) {
+      if (!root || typeof root !== 'object') continue;
+      for (const keyPath of keyPaths) {
+        const parts = keyPath.split('.');
+        let current = root;
+        let found = true;
+        for (const part of parts) {
+          if (!current || typeof current !== 'object' || !(part in current)) {
+            found = false;
+            break;
+          }
+          current = current[part];
+        }
+        if (found && current !== undefined && current !== null && `${current}`.trim() !== '') {
+          return current;
+        }
+      }
+    }
+    return null;
+  }
+
+  function extractTokenEconomy(summary, manifest) {
+    return (
+      pickFirst(
+        summary?.token_economy,
+        summary?.token_economy_totals,
+        summary?.token_telemetry,
+        manifest?.token_economy,
+        manifest?.token_economy_totals,
+        manifest?.token_telemetry,
+        manifest?.telemetry?.token_economy,
+        manifest?.telemetry?.token_telemetry
+      ) || {}
+    );
+  }
+
+  function extractDuplicateWork(summary, manifest, economy) {
+    return (
+      pickFirst(
+        summary?.duplicate_work,
+        summary?.duplicate_work_summary,
+        summary?.duplicate_work_count !== undefined ? { duplicate_work_count: summary.duplicate_work_count } : null,
+        manifest?.duplicate_work,
+        manifest?.duplicate_work_summary,
+        manifest?.duplicate_work_count !== undefined ? { duplicate_work_count: manifest.duplicate_work_count } : null,
+        economy?.duplicate_work,
+        economy?.duplicate_work_summary
+      ) || {}
+    );
+  }
+
+  function extractListMetric(source, keyPaths) {
+    return asList(findNested(source, keyPaths));
+  }
+
+  function readMetric(source, keyPaths) {
+    return findNested(source, keyPaths);
+  }
+
+  function formatMetricValue(value) {
+    if (value === null || value === undefined || value === '') return 'n/a';
+    return String(value);
+  }
+
+  function formatTokens(value) {
+    return formatMetricValue(value);
+  }
+
+  function formatRate(value) {
+    if (value === null || value === undefined || value === '') return 'n/a';
+    const numeric = typeof value === 'number' ? value : Number(value);
+    if (Number.isFinite(numeric)) {
+      return numeric <= 1 ? `${Math.round(numeric * 1000) / 10}%` : `${numeric}%`;
+    }
+    return String(value);
+  }
+
+  function formatCost(value) {
+    if (value === null || value === undefined || value === '') return 'n/a';
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return `$${value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}`;
+    }
+    return String(value);
+  }
+
+  function formatListValue(value) {
+    if (Array.isArray(value)) return value.map((item) => (typeof item === 'object' ? JSON.stringify(item) : String(item))).join(', ');
+    if (value && typeof value === 'object') return JSON.stringify(value);
+    return value === null || value === undefined || value === '' ? 'n/a' : String(value);
   }
 
   onMount(loadRun);
@@ -337,6 +467,55 @@
         <strong>{queueState.active_worker_id ? 'Active' : 'Idle'}</strong>
         <small>{queueState.status || 'idle'}</small>
       </article>
+    </section>
+
+    <section class="economy-panel">
+      <div class="panel-head">
+        <div>
+          <p class="section-label">Token economy</p>
+          <h2>Telemetry snapshot</h2>
+        </div>
+        <span class="panel-note">{trackingSummary.run_status || trackingManifest.run_status || factoryRun?.status || 'n/a'}</span>
+      </div>
+      {#if hasTokenTelemetry}
+        <div class="economy-grid">
+          <article>
+            <span>Input tokens</span>
+            <strong>{formatTokens(economyInputTokens)}</strong>
+          </article>
+          <article>
+            <span>Output tokens</span>
+            <strong>{formatTokens(economyOutputTokens)}</strong>
+          </article>
+          <article>
+            <span>Cached tokens</span>
+            <strong>{formatTokens(economyCachedTokens)}</strong>
+          </article>
+          <article>
+            <span>Cache hit rate</span>
+            <strong>{formatRate(economyCacheRate)}</strong>
+          </article>
+          <article>
+            <span>Cost estimate</span>
+            <strong>{formatCost(economyCostEstimate)}</strong>
+          </article>
+          <article>
+            <span>Template assets</span>
+            <strong>{formatListValue(economyAssets)}</strong>
+          </article>
+          <article>
+            <span>Context cards</span>
+            <strong>{formatListValue(economyContextCards)}</strong>
+          </article>
+          <article>
+            <span>Duplicate work</span>
+            <strong>{formatMetricValue(duplicateWorkCount)}</strong>
+            <small>{formatMetricValue(duplicateWorkStatus)}</small>
+          </article>
+        </div>
+      {:else}
+        <p class="empty-inline">No token telemetry captured yet.</p>
+      {/if}
     </section>
 
     <section class="work-strip">
@@ -756,6 +935,73 @@
     font-size: 0.75rem;
   }
 
+  .economy-panel {
+    background: rgba(5, 10, 15, 0.58);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-md);
+    margin-bottom: var(--spacing-md);
+    padding: var(--spacing-md);
+  }
+
+  .panel-head {
+    align-items: baseline;
+    display: flex;
+    gap: var(--spacing-sm);
+    justify-content: space-between;
+    margin-bottom: var(--spacing-md);
+  }
+
+  .panel-head h2 {
+    color: var(--color-text);
+    font-size: 1.05rem;
+    margin: 0;
+  }
+
+  .panel-note {
+    color: var(--color-text-secondary);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+  }
+
+  .economy-grid {
+    display: grid;
+    gap: var(--spacing-sm);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .economy-grid article {
+    background: rgba(4, 9, 14, 0.72);
+    border: 1px solid rgba(103, 128, 151, 0.16);
+    border-radius: var(--border-radius-sm);
+    padding: var(--spacing-sm);
+  }
+
+  .economy-grid span {
+    color: var(--color-text-secondary);
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+  }
+
+  .economy-grid strong {
+    color: var(--color-text);
+    display: block;
+    font-size: 0.88rem;
+    line-height: 1.25;
+    margin-top: 6px;
+    word-break: break-word;
+  }
+
+  .economy-grid small {
+    color: var(--color-text-secondary);
+    display: block;
+    font-size: 0.72rem;
+    margin-top: 4px;
+    word-break: break-word;
+  }
+
   .work-strip {
     display: grid;
     gap: var(--spacing-md);
@@ -995,6 +1241,10 @@
     .metrics-strip {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
+
+    .economy-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
 
   @media (max-width: 640px) {
@@ -1012,6 +1262,10 @@
     }
 
     .work-strip {
+      grid-template-columns: 1fr;
+    }
+
+    .economy-grid {
       grid-template-columns: 1fr;
     }
   }

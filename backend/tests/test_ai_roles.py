@@ -36,6 +36,10 @@ def _worker_context() -> dict:
             "pre_task": ["Read graphify-out/GRAPH_REPORT.md"],
             "post_task": ["Run 'graphify update .' after all code changes"],
         },
+        "ledger_context": {
+            "ledger_path": "karkhana-runs/run_123.md",
+            "sections": {"Current goal": "Implement the backend phase"},
+        },
         "goal": "Implement the backend phase",
     }
 
@@ -97,9 +101,13 @@ def test_worker_prompt_generation_and_validation():
     assert "Role: Worker" in contract["prompt"]
     assert "Read graphify-out/GRAPH_REPORT.md" in contract["prompt"]
     assert "Run graphify update . after code changes" in contract["prompt"]
+    assert "Factory Run Ledger" in contract["prompt"]
+    assert "karkhana-runs/run_123.md" in contract["prompt"]
     assert contract["prompt_template"].startswith("Role: Worker")
     assert contract["messages"][1]["content"] == contract["prompt"]
     assert contract["output_schema"]["properties"]["branch_name"]["type"] == "string"
+    assert contract["output_schema"]["properties"]["ledger_updated"]["type"] == "boolean"
+    assert contract["output_schema"]["properties"]["ledger_sections_updated"]["type"] == "array"
 
     with pytest.raises(ValueError, match="Missing required inputs"):
         RolePromptBuilder.build(
@@ -118,6 +126,7 @@ def test_worker_prompt_generation_and_validation():
                 "quality_gates": [],
                 "deliverables": [],
                 "verification_commands": [],
+                "ledger_context": {},
                 "goal": "Implement backend",
             },
         )

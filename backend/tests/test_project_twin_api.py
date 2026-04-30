@@ -164,6 +164,18 @@ async def test_worker_claim_heartbeat_complete_and_code_index(test_client: Async
             "result": {
                 "commit_sha": "abc123",
                 "tests_passed": True,
+                "token_economy": {
+                    "worker_run_id": "worker-run-001",
+                    "provider": "openai",
+                    "model": "gpt-5.4-mini",
+                    "input_tokens_total": 100,
+                    "input_tokens_cached": 25,
+                    "output_tokens": 50,
+                    "tool_calls_count": 2,
+                    "files_read_count": 3,
+                    "files_modified_count": 1,
+                    "cost_estimate_usd": 0.75,
+                },
                 "code_index": {
                     "file_inventory": [{"path": "package.json", "size": 120, "kind": "manifest"}],
                     "manifests": [{"path": "package.json", "content": "{}"}],
@@ -183,6 +195,10 @@ async def test_worker_claim_heartbeat_complete_and_code_index(test_client: Async
     assert status["project"]["index_status"] == "indexed"
     assert status["project"]["detected_stack"] == ["svelte"]
     assert status["latest_index"]["commit_sha"] == "abc123"
+    token_economy = complete.json()["job"]["result"]["token_economy"]
+    assert token_economy["cache_hit_rate"] == 0.25
+    assert token_economy["input_tokens_total"] == 100
+    assert token_economy["duplicate_work_detected"] is False
 
 
 @pytest.mark.asyncio
@@ -214,6 +230,25 @@ async def test_project_status_includes_factory_run_tracking(test_client: AsyncCl
     assert summary["graphify_status"] in {"pending", "running", "updated", "missing"}
     assert summary["verification_state"]["status"] == "pending"
     assert summary["worker_queue_state"]["total_work_items"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_build_next_actions_endpoint(test_client: AsyncClient, db_session):
+    repo = db_session.repo
+    idea = Idea(
+        title="Next Action Idea",
+        slug="next-action-idea",
+        description="Testing next action endpoint",
+        source_type="manual",
+    )
+    await repo.create_idea(idea)
+
+    response = await test_client.get(f"/api/ideas/{idea.id}/build/next-actions")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["idea_id"] == idea.id
+    assert data["next_actions"]
+    assert data["next_actions"][0]["suggested_owner"] == "local-worker"
 
 
 @pytest.mark.asyncio

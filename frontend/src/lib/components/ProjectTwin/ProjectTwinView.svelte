@@ -29,6 +29,10 @@
 
   let project = $derived(state?.project || null);
   let latestIndex = $derived(state?.latest_index || null);
+  let indexSummary = $derived(state?.index_summary || null);
+  let healthSummary = $derived(state?.health_summary || null);
+  let actionableMetadata = $derived(indexSummary?.actionable_metadata || healthSummary?.actionable_metadata || null);
+  let combinedRisks = $derived([...new Set([...(healthSummary?.dependency_risks || []), ...(latestIndex?.risks || [])])]);
   let factoryRuns = $derived(state?.factory_runs || []);
   let jobs = $derived(state?.jobs || []);
   let runningJobs = $derived(jobs.filter((job) => ['queued', 'waiting_for_machine', 'failed_retryable', 'claimed', 'running'].includes(job.status)));
@@ -95,6 +99,7 @@
     try {
       await apiPost(`/api/ideas/${ideaId}/project/reindex`, {});
       await loadProject();
+      await loadNextActions();
     } catch (err) {
       error = err.message || 'Unable to queue reindex.';
     } finally {
@@ -135,9 +140,42 @@
 
   function statusTone(status = '') {
     if (status === 'completed' || status === 'indexed') return 'success';
+    if (status === 'healthy' || status === 'fresh') return 'success';
+    if (status === 'needs_attention' || status === 'needs_reindex' || status === 'stale') return 'warning';
     if (status.includes('failed')) return 'error';
     if (status === 'running' || status === 'claimed' || status === 'queued') return 'warning';
     return 'muted';
+  }
+
+  function workerLabel(job) {
+    return job.worker_state?.worker_id || job.worker_id || 'unclaimed';
+  }
+
+  function jobHeartbeatLabel(job) {
+    const heartbeat = job.worker_state?.heartbeat_at || job.heartbeat_at;
+    if (job.execution_state?.is_stale) return 'heartbeat expired';
+    return heartbeat ? `heartbeat ${formatDate(heartbeat)}` : `updated ${formatDate(job.updated_at)}`;
+  }
+
+  function actionPrompt(action) {
+    return action.opencode_prompt || action.codex_prompt || '';
+  }
+
+  function opencodeSummary(job) {
+    const details = job.opencode || {};
+    return [details.engine || job.engine, details.model || job.model, details.agent || job.agent_name].filter(Boolean).join(' · ');
+  }
+
+  function branchLabel(job) {
+    return job.branch_name || job.opencode?.branch_name || job.payload?.branch || job.payload?.branch_name || '';
+  }
+
+  function promptPreview(job) {
+    return job.opencode?.prompt_preview || job.payload?.prompt || job.payload?.role_prompt || job.payload?.codex_prompt || '';
+  }
+
+  function resultSummary(job) {
+    return job.result?.agent_output || job.result?.summary || JSON.stringify(job.result, null, 2);
   }
 
   $effect(() => () => {
@@ -244,8 +282,8 @@
       </article>
       <article>
         <span>Health</span>
-        <strong>{project.health_status}</strong>
-        <small>Updated {formatDate(project.updated_at)}</small>
+        <strong>{healthSummary?.status ?? project.health_status}</strong>
+        <small>{healthSummary?.summary || `Updated ${formatDate(project.updated_at)}`}</small>
       </article>
     </section>
 
@@ -264,7 +302,7 @@
               <span>{nextActionsSummary.current_phase}</span>
               <span>{nextActionsSummary.current_step}</span>
               <span>{nextActionsSummary.project_attached ? 'project linked' : 'no project twin'}</span>
-              <span>{nextActions.length} actions</span>
+              <span>{nextActionsSummary.project_health?.index_freshness?.state ?? `${nextActions.length} actions`}</span>
             </div>
           {/if}
           {#if nextActions.length}
@@ -278,10 +316,13 @@
                     </div>
                   </div>
                   <p>{action.reason}</p>
-                  {#if action.codex_prompt}
+                  {#if action.opencode_command}
+                    <small class="job-meta">Command: {action.opencode_command}</small>
+                  {/if}
+                  {#if actionPrompt(action)}
                     <div class="prompt-actions">
-                      <Button size="sm" variant="secondary" onclick={() => copyPrompt(action.codex_prompt, index)}>
-                        {#if copiedPromptId === `${index}`}<Check size={14} /> Copied{:else}<Clipboard size={14} /> Copy prompt{/if}
+                      <Button size="sm" variant="secondary" onclick={() => copyPrompt(actionPrompt(action), index)}>
+                        {#if copiedPromptId === `${index}`}<Check size={14} /> Copied{:else}<Clipboard size={14} /> Copy OpenCode prompt{/if}
                       </Button>
                     </div>
                   {/if}
@@ -304,24 +345,82 @@
         </header>
         {#if latestIndex}
           <div class="facts">
-            <span>{latestIndex.file_inventory?.length || 0} files</span>
-            <span>{latestIndex.manifests?.length || 0} manifests</span>
-            <span>{latestIndex.route_map?.length || 0} route hints</span>
-            <span>{latestIndex.todos?.length || 0} TODOs</span>
+            <span>{indexSummary?.file_count ?? latestIndex.file_inventory?.length ?? 0} files</span>
+            <span>{indexSummary?.manifest_count ?? latestIndex.manifests?.length ?? 0} manifests</span>
+            <span>{indexSummary?.route_hint_count ?? latestIndex.route_map?.length ?? 0} route hints</span>
+            <span>{indexSummary?.todo_count ?? latestIndex.todos?.length ?? 0} TODOs</span>
           </div>
+          {#if healthSummary}
+            <div class="health-card">
+              <div class="factory-row-head">
+                <strong>{healthSummary.summary}</strong>
+                <Badge variant={statusTone(healthSummary.index_freshness?.state)}>{healthSummary.index_freshness?.state || 'unknown'}</Badge>
+              </div>
+              <p>{healthSummary.index_freshness?.reason || 'Index freshness has not been assessed yet.'}</p>
+            </div>
+          {/if}
           <h3>Detected stack</h3>
-          <p>{project.detected_stack?.length ? project.detected_stack.join(', ') : 'No stack summary yet.'}</p>
-          <h3>Test commands</h3>
-          <p>{project.test_commands?.length ? project.test_commands.join(' | ') : 'No test commands detected yet.'}</p>
+          <p>{indexSummary?.detected_stack?.length ? indexSummary.detected_stack.join(', ') : project.detected_stack?.length ? project.detected_stack.join(', ') : 'No stack summary yet.'}</p>
+          <h3>Manifests</h3>
+          <p>{indexSummary?.manifest_paths?.length ? indexSummary.manifest_paths.join(', ') : 'No manifests detected yet.'}</p>
+          <h3>Commands</h3>
+          <p>{indexSummary?.test_commands?.length ? `Tests: ${indexSummary.test_commands.join(' | ')}` : 'No test commands detected yet.'}</p>
+          {#if indexSummary?.build_commands?.length}
+            <p>Build/deploy: {indexSummary.build_commands.join(' | ')}</p>
+          {/if}
+          <h3>Structure hints</h3>
+          {#if indexSummary?.route_hints?.length}
+            <ul class="compact-list">
+              {#each indexSummary.route_hints as hint}
+                <li>{hint}</li>
+              {/each}
+            </ul>
+          {:else}
+            <p>No route or app structure hints detected yet.</p>
+          {/if}
+          <h3>Deployment hints</h3>
+          <p>{indexSummary?.deploy_hints?.length ? indexSummary.deploy_hints.join(', ') : 'No deployment hints detected yet.'}</p>
+          {#if actionableMetadata}
+            <h3>Planning metadata</h3>
+            <div class="facts wrapped">
+              <span>{actionableMetadata.package_manifests?.length || 0} package manifests</span>
+              <span>{actionableMetadata.likely_test_commands?.length || 0} test commands</span>
+              <span>{actionableMetadata.likely_build_commands?.length || 0} build commands</span>
+              <span>{actionableMetadata.index_status?.is_stale ? 'stale index' : 'fresh enough'}</span>
+            </div>
+            {#if actionableMetadata.next_action_hints?.length}
+              <ul class="compact-list">
+                {#each actionableMetadata.next_action_hints as hint}
+                  <li>{hint}</li>
+                {/each}
+              </ul>
+            {/if}
+          {/if}
           <h3>Risks</h3>
-          {#if latestIndex.risks?.length}
+          {#if combinedRisks.length}
             <ul>
-              {#each latestIndex.risks as risk}
+              {#each combinedRisks as risk}
                 <li>{risk}</li>
               {/each}
             </ul>
           {:else}
             <p>No indexed risks yet.</p>
+          {/if}
+          {#if indexSummary?.todo_samples?.length}
+            <h3>TODO/FIXME samples</h3>
+            <ul class="compact-list">
+              {#each indexSummary.todo_samples as todo}
+                <li>{todo}</li>
+              {/each}
+            </ul>
+          {/if}
+          {#if healthSummary?.missing_info?.length}
+            <h3>Missing signals</h3>
+            <ul class="compact-list">
+              {#each healthSummary.missing_info as gap}
+                <li>{gap}</li>
+              {/each}
+            </ul>
           {/if}
         {:else}
           <div class="empty">
@@ -457,9 +556,55 @@
                 </span>
                 <div>
                   <strong>{job.job_type}</strong>
-                  <small>{job.status} · {job.worker_id || 'unclaimed'} · {formatDate(job.updated_at)}</small>
+                  <small>{job.status} · priority {job.priority ?? job.execution_state?.priority ?? 50} · {workerLabel(job)}</small>
+                  <small>{jobHeartbeatLabel(job)} · retries {job.retry_count || 0}</small>
+                  {#if job.error}
+                    <small class="job-error">{job.error}</small>
+                  {/if}
+                  {#if opencodeSummary(job)}
+                    <small class="job-meta">OpenCode: {opencodeSummary(job)}</small>
+                  {/if}
+                  {#if branchLabel(job)}
+                    <small class="job-meta">Branch: {branchLabel(job)}</small>
+                  {/if}
+                  {#if job.command || job.opencode?.command}
+                    <details>
+                      <summary>OpenCode command</summary>
+                      <pre>{job.command || job.opencode.command}</pre>
+                    </details>
+                  {/if}
+                  {#if promptPreview(job)}
+                    <details>
+                      <summary>OpenCode prompt</summary>
+                      <pre>{promptPreview(job)}</pre>
+                    </details>
+                  {/if}
+                  {#if job.logs_tail}
+                    <details>
+                      <summary>Logs</summary>
+                      <pre>{job.logs_tail}</pre>
+                    </details>
+                  {/if}
+                  {#if job.result}
+                    <details>
+                      <summary>Result</summary>
+                      <pre>{resultSummary(job)}</pre>
+                    </details>
+                  {/if}
+                  {#if job.debug_prompt}
+                    <details>
+                      <summary>Debug follow-up</summary>
+                      <pre>{job.debug_prompt}</pre>
+                    </details>
+                  {/if}
+                  {#if job.error && promptPreview(job)}
+                    <details>
+                      <summary>Suggested OpenCode retry prompt</summary>
+                      <pre>{job.debug_prompt || promptPreview(job)}</pre>
+                    </details>
+                  {/if}
                 </div>
-                <Badge variant={statusTone(job.status)}>{job.retry_count || 0}</Badge>
+                <Badge variant={statusTone(job.status)}>{job.execution_state?.category || job.status}</Badge>
               </article>
             {/each}
           </div>
@@ -680,6 +825,23 @@
     text-align: center;
   }
 
+  .health-card {
+    background: rgba(0, 120, 255, 0.08);
+    border: 1px solid rgba(0, 240, 255, 0.16);
+    border-radius: var(--border-radius-md);
+    margin-top: var(--spacing-md);
+    padding: 10px;
+  }
+
+  .health-card p {
+    margin: 8px 0 0;
+  }
+
+  .compact-list {
+    margin: 6px 0 0;
+    padding-left: 18px;
+  }
+
   .factory-list {
     display: grid;
     gap: 10px;
@@ -771,6 +933,36 @@
 
   .job-icon {
     color: var(--color-primary-2);
+  }
+
+  .job-error {
+    color: var(--color-error) !important;
+  }
+
+  .job-meta {
+    color: var(--color-primary-2) !important;
+  }
+
+  details {
+    margin-top: 6px;
+  }
+
+  summary {
+    color: var(--color-primary-2);
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+
+  pre {
+    background: rgba(0, 0, 0, 0.26);
+    border-radius: var(--border-radius-sm);
+    color: var(--color-text-secondary);
+    font-size: 0.72rem;
+    margin: 6px 0 0;
+    max-height: 180px;
+    overflow: auto;
+    padding: 8px;
+    white-space: pre-wrap;
   }
 
   .empty,

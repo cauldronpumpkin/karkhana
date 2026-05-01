@@ -8,23 +8,25 @@ from backend.app.repository import (
     GitHubInstallation,
     Idea,
     InMemoryRepository,
+    ProjectCommit,
     ProjectTwin,
     TemplateArtifact,
     TemplatePack,
     set_repository,
+    utcnow,
 )
 
 
-async def _approved_worker(test_client: AsyncClient):
+async def _approved_worker(test_client: AsyncClient, *, engine: str = "openclaude", config: dict | None = None):
     registered = await test_client.post(
         "/api/local-workers/register",
         json={
             "display_name": "Build Box",
             "machine_name": "WIN-BUILD-1",
             "platform": "Windows 11",
-            "engine": "openclaude",
+            "engine": engine,
             "capabilities": ["repo_index", "agent_branch_work"],
-            "config": {"autonomy": "branch_pr"},
+            "config": config or {"autonomy": "branch_pr"},
         },
     )
     request_id = registered.json()["request"]["id"]
@@ -117,6 +119,8 @@ async def test_import_github_project_creates_idea_project_and_initial_job(test_c
     assert data["project"]["repo_full_name"] == "cauld/example-app"
     assert data["job"]["job_type"] == "repo_index"
     assert data["job"]["status"] == "queued"
+    assert data["job"]["execution_state"]["category"] == "queued"
+    assert "claim_token" not in data["job"]
 
     status = await test_client.get(f"/api/ideas/{data['idea']['id']}/project")
     assert status.status_code == 200
@@ -125,7 +129,7 @@ async def test_import_github_project_creates_idea_project_and_initial_job(test_c
 
 @pytest.mark.asyncio
 async def test_worker_claim_heartbeat_complete_and_code_index(test_client: AsyncClient):
-    worker, credentials = await _approved_worker(test_client)
+    worker, credentials = await _approved_worker(test_client, engine="opencode", config={"autonomy": "branch_pr", "agent": "build", "model": "configured-model"})
     imported = await test_client.post(
         "/api/ideas/import/github",
         json={
@@ -144,6 +148,11 @@ async def test_worker_claim_heartbeat_complete_and_code_index(test_client: Async
     assert claim_response.status_code == 200
     claim = claim_response.json()["claim"]
     assert claim["job"]["status"] == "claimed"
+    assert claim["job"]["claim_token"]
+    assert claim["job"]["engine"] == "opencode"
+    assert claim["job"]["opencode"]["engine"] == "opencode"
+    assert claim["job"]["opencode"]["has_prompt"] is False
+    assert claim["job"]["agent_run_id"]
 
     job = claim["job"]
     heartbeat = await test_client.post(
@@ -152,7 +161,13 @@ async def test_worker_claim_heartbeat_complete_and_code_index(test_client: Async
         headers={"Authorization": f"Bearer {credentials['api_token']}"},
     )
     assert heartbeat.status_code == 200
-    assert heartbeat.json()["job"]["status"] == "running"
+    heartbeat_job = heartbeat.json()["job"]
+    assert heartbeat_job["status"] == "running"
+    assert heartbeat_job["execution_state"]["category"] == "running"
+    assert heartbeat_job["execution_state"]["is_active"] is True
+    assert heartbeat_job["worker_state"]["worker_id"] == worker["id"]
+    assert heartbeat_job["worker_state"]["heartbeat_at"]
+    assert heartbeat_job["logs_tail"] == "still alive"
 
     complete = await test_client.post(
         f"/api/worker/jobs/{job['id']}/complete",
@@ -164,6 +179,11 @@ async def test_worker_claim_heartbeat_complete_and_code_index(test_client: Async
             "result": {
                 "commit_sha": "abc123",
                 "tests_passed": True,
+                "engine": "opencode",
+                "model": "gpt-test",
+                "agent_name": "build",
+                "command": "opencode run --dangerously-skip-permissions <prompt>",
+                "branch_name": "factory/job-1/fix",
                 "token_economy": {
                     "worker_run_id": "worker-run-001",
                     "provider": "openai",
@@ -177,10 +197,20 @@ async def test_worker_claim_heartbeat_complete_and_code_index(test_client: Async
                     "cost_estimate_usd": 0.75,
                 },
                 "code_index": {
-                    "file_inventory": [{"path": "package.json", "size": 120, "kind": "manifest"}],
-                    "manifests": [{"path": "package.json", "content": "{}"}],
+                    "file_inventory": [
+                        {"path": "package.json", "size": 120, "kind": "manifest"},
+                        {"path": "package-lock.json", "size": 420, "kind": "manifest"},
+                        {"path": "Dockerfile", "size": 80, "kind": "manifest"},
+                        {"path": "src/routes/+page.svelte", "size": 1000, "kind": "source"},
+                    ],
+                    "manifests": [
+                        {"path": "package.json", "content": "{\"scripts\":{\"test\":\"vitest\",\"build\":\"vite build\"}}"},
+                        {"path": "Dockerfile", "content": "FROM node:20"},
+                    ],
                     "detected_stack": ["svelte"],
                     "test_commands": ["npm test"],
+                    "route_map": [{"path": "src/routes/+page.svelte", "line": "export const load = async () => ({})"}],
+                    "todos": ["src/routes/+page.svelte: TODO validate deployment"],
                     "architecture_summary": "# Codebase Dossier\n\nIndexed.",
                     "risks": ["No CI detected."],
                 },
@@ -188,17 +218,108 @@ async def test_worker_claim_heartbeat_complete_and_code_index(test_client: Async
         },
     )
     assert complete.status_code == 200
-    assert complete.json()["job"]["status"] == "completed"
+    completed_job = complete.json()["job"]
+    assert completed_job["status"] == "completed"
+    assert "claim_token" not in completed_job
+    assert completed_job["execution_state"]["category"] == "completed"
+    assert completed_job["execution_state"]["is_terminal"] is True
+    assert completed_job["worker_state"]["has_claim_token"] is True
+    assert completed_job["engine"] == "opencode"
+    assert completed_job["model"] == "gpt-test"
+    assert completed_job["agent_name"] == "build"
+    assert completed_job["command"].startswith("opencode run")
+    assert completed_job["branch_name"] == "factory/job-1/fix"
+    assert completed_job["opencode"]["branch_name"] == "factory/job-1/fix"
 
     status = (await test_client.get(f"/api/ideas/{idea_id}/project")).json()
     assert status["project"]["last_indexed_commit"] == "abc123"
     assert status["project"]["index_status"] == "indexed"
     assert status["project"]["detected_stack"] == ["svelte"]
     assert status["latest_index"]["commit_sha"] == "abc123"
+    assert status["index_summary"]["manifest_paths"] == ["package.json", "Dockerfile"]
+    assert status["index_summary"]["build_commands"] == ["npm run build", "docker build ."]
+    assert status["index_summary"]["deploy_hints"] == ["docker"]
+    assert status["index_summary"]["todo_count"] == 1
+    assert status["health_summary"]["index_freshness"]["state"] == "fresh"
+    metadata = status["index_summary"]["actionable_metadata"]
+    assert metadata["package_manifests"][0]["path"] == "package.json"
+    assert metadata["package_manifests"][0]["scripts"] == ["build", "test"]
+    assert metadata["likely_test_commands"] == ["npm test"]
+    assert metadata["likely_build_commands"] == ["npm run build", "docker build ."]
+    assert metadata["route_hints"] == ["src/routes/+page.svelte: export const load = async () => ({})"]
+    assert metadata["deployment_hints"] == ["docker"]
+    assert metadata["todo_markers"] == ["src/routes/+page.svelte: TODO validate deployment"]
+    assert metadata["index_status"] == {
+        "project_status": "indexed",
+        "freshness": "fresh",
+        "last_indexed_commit": "abc123",
+        "latest_known_commit": "abc123",
+        "is_stale": False,
+    }
+    assert "Validate with: npm test" in metadata["next_action_hints"]
+    assert status["health_summary"]["actionable_metadata"] == metadata
+    assert status["agent_runs"]
+    run = status["agent_runs"][0]
+    assert run["work_item_id"] == job["id"]
+    assert run["status"] == "completed"
+    assert run["engine"] == "opencode"
+    assert run["model"] == "gpt-test"
+    assert run["agent_name"] == "build"
+    assert run["branch_name"] == "factory/job-1/fix"
+    assert run["command"].startswith("opencode run")
     token_economy = complete.json()["job"]["result"]["token_economy"]
     assert token_economy["cache_hit_rate"] == 0.25
     assert token_economy["input_tokens_total"] == 100
     assert token_economy["duplicate_work_detected"] is False
+
+
+@pytest.mark.asyncio
+async def test_jobs_api_exposes_worker_execution_inspection_fields(test_client: AsyncClient):
+    worker, credentials = await _approved_worker(test_client, engine="opencode")
+    imported = await test_client.post(
+        "/api/ideas/import/github",
+        json={"installation_id": "12345", "repo_full_name": "cauld/inspectable-app", "default_branch": "main"},
+    )
+    idea_id = imported.json()["idea"]["id"]
+
+    claim = (
+        await test_client.post(
+            "/api/worker/claim",
+            json={"worker_id": worker["id"]},
+            headers={"Authorization": f"Bearer {credentials['api_token']}"},
+        )
+    ).json()["claim"]["job"]
+
+    failed = await test_client.post(
+        f"/api/worker/jobs/{claim['id']}/fail",
+        headers={"Authorization": f"Bearer {credentials['api_token']}"},
+        json={
+            "worker_id": worker["id"],
+            "claim_token": claim["claim_token"],
+            "error": "worker command failed",
+            "retryable": True,
+            "logs": "stderr: command failed",
+        },
+    )
+    assert failed.status_code == 200
+
+    jobs_response = await test_client.get(f"/api/ideas/{idea_id}/jobs")
+    assert jobs_response.status_code == 200
+    job = next(item for item in jobs_response.json()["jobs"] if item["id"] == claim["id"])
+    assert job["status"] == "failed_retryable"
+    assert "claim_token" not in job
+    assert job["priority"] == 50
+    assert job["execution_state"]["category"] == "failed"
+    assert job["execution_state"]["is_claimable"] is True
+    assert job["execution_state"]["retry_count"] == 1
+    assert job["worker_state"]["worker_id"] == worker["id"]
+    assert job["has_error"] is True
+    assert job["error"] == "worker command failed"
+    assert job["logs_tail"] == "stderr: command failed"
+    assert job["engine"] == "opencode"
+    assert job["opencode"]["engine"] == "opencode"
+    assert job["debug_prompt"].startswith("Debug this failed Idea Refinery")
+    assert "worker command failed" in job["debug_prompt"]
 
 
 @pytest.mark.asyncio
@@ -249,6 +370,60 @@ async def test_build_next_actions_endpoint(test_client: AsyncClient, db_session)
     assert data["idea_id"] == idea.id
     assert data["next_actions"]
     assert data["next_actions"][0]["suggested_owner"] == "local-worker"
+
+
+@pytest.mark.asyncio
+async def test_build_next_actions_include_stale_project_twin_signal(test_client: AsyncClient, db_session):
+    repo = db_session.repo
+    idea = Idea(
+        title="Stale Twin Idea",
+        slug="stale-twin-idea",
+        description="Testing stale index action",
+        source_type="github_project",
+    )
+    await repo.create_idea(idea)
+    project = ProjectTwin(
+        idea_id=idea.id,
+        provider="github",
+        installation_id="99",
+        owner="acme",
+        repo="stale-app",
+        repo_full_name="acme/stale-app",
+        repo_url="https://github.com/acme/stale-app",
+        clone_url="https://github.com/acme/stale-app.git",
+        default_branch="main",
+        last_indexed_commit="old123",
+        index_status="indexed",
+        health_status="healthy",
+    )
+    await repo.save_project_twin(project)
+    await repo.put_code_index(CodeIndexArtifact(
+        project_id=project.id,
+        idea_id=idea.id,
+        commit_sha="old123",
+        file_inventory=[{"path": "package.json", "size": 120, "kind": "manifest"}],
+        manifests=[{"path": "package.json", "content": "{\"scripts\":{\"test\":\"vitest\"}}"}],
+        test_commands=["npm test"],
+    ))
+    await repo.add_project_commit(ProjectCommit(
+        idea_id=idea.id,
+        project_id=project.id,
+        work_item_id="work-1",
+        branch_name="main",
+        commit_sha="new456",
+        message="newer commit",
+        created_at=utcnow(),
+    ))
+
+    response = await test_client.get(f"/api/ideas/{idea.id}/build/next-actions")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status_summary"]["project_health"]["index_freshness"]["state"] == "stale"
+    stale_metadata = data["status_summary"]["project_health"]["actionable_metadata"]
+    assert stale_metadata["index_status"]["is_stale"] is True
+    assert stale_metadata["index_status"]["latest_known_commit"] == "new456"
+    assert stale_metadata["next_action_hints"][0] == "Reindex before planning code changes."
+    assert any(action["title"] == "Reindex the project twin" for action in data["next_actions"])
 
 
 @pytest.mark.asyncio

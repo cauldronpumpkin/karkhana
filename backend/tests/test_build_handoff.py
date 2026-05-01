@@ -146,6 +146,9 @@ async def test_get_next_actions(db_session, sample_idea, temp_dir):
         assert result["next_actions"]
         assert result["next_actions"][0]["priority"] == 1
         assert "codex_prompt" in result["next_actions"][0]
+        assert result["next_actions"][0]["engine"] == "opencode"
+        assert result["next_actions"][0]["opencode_prompt"] == result["next_actions"][0]["codex_prompt"]
+        assert result["next_actions"][0]["opencode_command"].startswith("opencode run")
 
 
 @pytest.mark.asyncio

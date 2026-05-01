@@ -1,26 +1,9 @@
-use crate::opencode_session::{
+﻿use crate::opencode_session::{
     MessagePart, OpenCodeClient, SendMessageRequest,
 };
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::process::Command;
-
-pub const LIMITED_ENGINES: &[&str] = &["opencode", "openclaude", "codex"];
-
-pub fn is_limited_engine(engine: &str) -> bool {
-    LIMITED_ENGINES.contains(&engine)
-}
-
-pub fn is_valid_for_high_autonomy(engine: &str, capabilities: &[String]) -> bool {
-    if engine == "opencode-server" {
-        return true;
-    }
-    if is_limited_engine(engine) {
-        let required = crate::types::HIGH_AUTONOMY_REQUIRED_CAPABILITIES;
-        return required.iter().all(|cap| capabilities.iter().any(|c| c == cap));
-    }
-    false
-}
 
 pub enum EngineMode {
     Cli,
@@ -43,106 +26,6 @@ pub async fn run_agent<P: AsRef<Path>>(
         }
         EngineMode::Cli => run_cli_agent(repo_dir, prompt, engine, settings, logs).await,
     }
-}
-
-pub async fn run_server_agent_session<P: AsRef<Path>>(
-    repo_dir: P,
-    prompt: &str,
-    engine: &str,
-    settings: &HashMap<String, serde_json::Value>,
-    logs: &mut Vec<String>,
-) -> Result<ServerAgentResult, String> {
-    let repo_dir = repo_dir.as_ref();
-    let mode = resolve_engine_mode(engine, settings);
-
-    match mode {
-        EngineMode::Server { base_url } => {
-            let client = OpenCodeClient::new(&base_url);
-
-            client
-                .health()
-                .await
-                .map_err(|e| format!("OpenCode server not healthy: {e}"))?;
-
-            let session = client
-                .create_session(&format!(
-                    "idearefinery-{}",
-                    chrono_no_std_fallback_id()
-                ))
-                .await
-                .map_err(|e| format!("Failed to create session: {e}"))?;
-
-            logs.push(format!("Created OpenCode session: {}", session.id));
-
-            let mut req = SendMessageRequest {
-                parts: vec![MessagePart {
-                    part_type: "text".to_string(),
-                    text: prompt.to_string(),
-                }],
-                model: None,
-                agent: None,
-            };
-
-            if let Some(agent) = settings.get("agent").and_then(|v| v.as_str()) {
-                req.agent = Some(agent.to_string());
-            }
-
-            let result = client
-                .send_message(&session.id, &req)
-                .await
-                .map_err(|e| format!("Failed to send message: {e}"))?;
-
-            let output = result
-                .parts
-                .iter()
-                .filter_map(|p| {
-                    if p.get("type").and_then(|v| v.as_str()) == Some("text") {
-                        p.get("text").and_then(|v| v.as_str()).map(|s| s.to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-
-            if !output.trim().is_empty() {
-                logs.push(output.trim().to_string());
-            }
-
-            let diff = client
-                .get_diff(&session.id)
-                .await
-                .unwrap_or_default()
-                .iter()
-                .map(|d| d.data.to_string())
-                .collect::<Vec<_>>()
-                .join("\n");
-
-            let _ = client.delete_session(&session.id).await;
-
-            Ok(ServerAgentResult {
-                session_id: session.id,
-                output: output.clone(),
-                diff,
-            })
-        }
-        EngineMode::Cli => {
-            let output =
-                run_cli_agent(repo_dir, prompt, engine, settings, logs).await;
-            Ok(ServerAgentResult {
-                session_id: String::new(),
-                output: output.clone(),
-                diff: String::new(),
-            })
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ServerAgentResult {
-    pub session_id: String,
-    pub output: String,
-    pub diff: String,
 }
 
 fn resolve_engine_mode(
@@ -275,7 +158,12 @@ async fn run_cli_agent<P: AsRef<Path>>(
     }
 
     if engine == "opencode" && which::which("opencode").is_ok() {
-        return run_command(&["opencode", "run", prompt], repo_dir, logs).await;
+        return run_command(
+            &["opencode", "run", prompt],
+            repo_dir,
+            logs,
+        )
+        .await;
     }
 
     if which::which("codex").is_ok() {
@@ -318,12 +206,4 @@ async fn run_command(args: &[&str], cwd: &Path, logs: &mut Vec<String>) -> Strin
     logs.push(format!("exit code: {}", output.status.code().unwrap_or(-1)));
 
     combined
-}
-
-fn chrono_no_std_fallback_id() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{:x}", duration.as_millis())
 }

@@ -34,6 +34,26 @@ const mockTasks = {
   ],
 };
 
+const mockJobs = {
+  jobs: [{
+    id: 'job-1',
+    job_type: 'agent_branch_work',
+    status: 'failed_retryable',
+    priority: 40,
+    retry_count: 1,
+    worker_state: { worker_id: 'worker-1' },
+    engine: 'opencode',
+    model: 'gpt-test',
+    agent_name: 'build',
+    command: 'opencode run --dangerously-skip-permissions <prompt>',
+    branch_name: 'factory/job-1/fix',
+    payload: { prompt: 'Fix the worker bridge' },
+    error: 'worker command failed',
+    debug_prompt: 'Debug this failed Idea Refinery local-worker job in OpenCode.',
+    result: { agent_output: 'partial output' },
+  }],
+};
+
 describe('Actions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -51,6 +71,20 @@ describe('Actions', () => {
 
     expect(screen.getByText('Awaiting evidence file')).toBeInTheDocument();
     expect(screen.getByText('task-2-result.md')).toBeInTheDocument();
+  });
+
+  it('renders OpenCode job diagnostics in the build queue', async () => {
+    apiModule.api.mockImplementation((path) => Promise.resolve(path.endsWith('/jobs') ? mockJobs : mockTasks));
+
+    render(Actions, { ideaId: 'idea-1' });
+
+    expect(await screen.findByText('agent_branch_work')).toBeInTheDocument();
+    expect(screen.getByText(/OpenCode: opencode · gpt-test · build/i)).toBeInTheDocument();
+    expect(screen.getByText(/Branch: factory\/job-1\/fix/i)).toBeInTheDocument();
+    expect(screen.getByText(/worker command failed/i)).toBeInTheDocument();
+    expect(screen.getByText(/OpenCode command/i)).toBeInTheDocument();
+    expect(screen.getByText(/Debug follow-up/i)).toBeInTheDocument();
+    expect(screen.getByText(/Suggested OpenCode retry prompt/i)).toBeInTheDocument();
   });
 
   it('opens the upload modal from a pending card', async () => {

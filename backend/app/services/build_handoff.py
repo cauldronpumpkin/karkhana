@@ -10,6 +10,7 @@ from backend.app.repository import get_repository
 from backend.app.services.file_manager import FileManager
 from backend.app.services.llm import LLMService
 from backend.app.services.memory import MemoryService
+from backend.app.services.project_twin import summarize_project_twin
 from backend.app.services.scoring import ScoringService
 
 BUILD_STEPS = [
@@ -52,7 +53,7 @@ def _build_context_files(project: Any | None) -> list[str]:
     return context_files
 
 
-def _codex_prompt(goal: str, context_files: list[str], constraints: list[str], deliverables: list[str], verification_commands: list[str]) -> str:
+def _opencode_prompt(goal: str, context_files: list[str], constraints: list[str], deliverables: list[str], verification_commands: list[str]) -> str:
     lines = [
         f"Goal: {goal}",
         f"Repo path: {_safe_repo_path()}",
@@ -70,8 +71,17 @@ def _codex_prompt(goal: str, context_files: list[str], constraints: list[str], d
     return "\n".join(lines)
 
 
+def _opencode_command() -> str:
+    return "opencode run --dangerously-skip-permissions <copy prompt from this action>"
+
+
+def _codex_prompt(goal: str, context_files: list[str], constraints: list[str], deliverables: list[str], verification_commands: list[str]) -> str:
+    """Backward-compatible alias for older clients that still read codex_prompt."""
+    return _opencode_prompt(goal, context_files, constraints, deliverables, verification_commands)
+
+
 class BuildHandoffService:
-    """Service for generating Prometheus build handoff prompts and tracking build progress."""
+    """Service for generating OpenCode build handoff prompts and tracking build progress."""
 
     def __init__(
         self,
@@ -320,7 +330,8 @@ class BuildHandoffService:
 
     async def get_next_actions(self, idea_id: str) -> dict[str, Any]:
         idea = await self._get_idea(idea_id)
-        project = await get_repository().get_project_twin(idea_id)
+        repo = get_repository()
+        project = await repo.get_project_twin(idea_id)
         state = await self.get_current_build_state(idea_id)
         remaining = state["remaining_steps"]
         latest_step = remaining[0] if remaining else None
@@ -332,26 +343,35 @@ class BuildHandoffService:
 
         actions: list[dict[str, Any]] = []
         context_files = _build_context_files(project)
+        project_health: dict[str, Any] | None = None
+        if project:
+            latest_index = await repo.get_latest_code_index(idea_id)
+            commits = await repo.list_project_commits(idea_id)
+            project_health = summarize_project_twin(project, latest_index, commits)["health_summary"]
 
+        opencode_prompt = _opencode_prompt(
+            goal=f"Complete the next build step for {idea.title}",
+            context_files=context_files,
+            constraints=[
+                "Keep worker execution separate from the web/backend control plane.",
+                "Do not introduce a new database.",
+                "Preserve existing API compatibility unless absolutely necessary.",
+            ],
+            deliverables=[
+                "Implement the next build step with minimal localized changes.",
+                "Update or add tests for the step.",
+            ],
+            verification_commands=["python -m pytest backend/tests", "graphify update ."],
+        )
         actions.append({
             "title": "Advance the next build step",
             "reason": f"Current step is {state['current_step']}; next up is {latest_step or 'completion' }.",
             "priority": 1,
             "suggested_owner": "local-worker",
-            "codex_prompt": _codex_prompt(
-                goal=f"Complete the next build step for {idea.title}",
-                context_files=context_files,
-                constraints=[
-                    "Keep worker execution separate from the web/backend control plane.",
-                    "Do not introduce a new database.",
-                    "Preserve existing API compatibility unless absolutely necessary.",
-                ],
-                deliverables=[
-                    "Implement the next build step with minimal localized changes.",
-                    "Update or add tests for the step.",
-                ],
-                verification_commands=["python -m pytest backend/tests", "graphify update ."],
-            ),
+            "engine": "opencode",
+            "opencode_prompt": opencode_prompt,
+            "opencode_command": _opencode_command(),
+            "codex_prompt": opencode_prompt,
         })
 
         if not project:
@@ -361,6 +381,23 @@ class BuildHandoffService:
                 "priority": 2,
                 "suggested_owner": "backend",
             })
+
+        if project and project_health:
+            freshness = project_health.get("index_freshness") or {}
+            if freshness.get("state") == "stale":
+                actions.append({
+                    "title": "Reindex the project twin",
+                    "reason": freshness.get("reason") or "The code index appears stale relative to known repository state.",
+                    "priority": 2,
+                    "suggested_owner": "local-worker",
+                })
+            elif project_health.get("dependency_risks"):
+                actions.append({
+                    "title": "Review project twin health risks",
+                    "reason": "; ".join(project_health["dependency_risks"][:2]),
+                    "priority": 3,
+                    "suggested_owner": "local-worker",
+                })
 
         if not scores:
             actions.append({
@@ -378,6 +415,7 @@ class BuildHandoffService:
                 "current_step": state["current_step"],
                 "remaining_steps": remaining,
                 "project_attached": bool(project),
+                "project_health": project_health,
             },
             "next_actions": actions,
         }

@@ -15,7 +15,7 @@ from backend.app.repository import (
     get_repository,
     utcnow,
 )
-from backend.app.services.project_twin import ProjectTwinService, to_jsonable
+from backend.app.services.project_twin import ProjectTwinService, job_to_jsonable, to_jsonable
 
 
 DEFAULT_CAPABILITIES = [
@@ -42,7 +42,7 @@ class LocalWorkerService:
             display_name=(data.get("display_name") or data.get("machine_name") or "Local worker").strip(),
             machine_name=(data.get("machine_name") or "unknown").strip(),
             platform=(data.get("platform") or "unknown").strip(),
-            engine=(data.get("engine") or "openclaude").strip(),
+            engine=(data.get("engine") or "opencode").strip(),
             capabilities=data.get("capabilities") or DEFAULT_CAPABILITIES,
             requested_config=requested_config,
             tenant_id=(data.get("tenant_id") or "").strip() or None,
@@ -68,6 +68,7 @@ class LocalWorkerService:
 
     async def dashboard(self) -> dict[str, Any]:
         repo = get_repository()
+        await ProjectTwinService().requeue_expired_claims()
         workers = await repo.list_local_workers()
         requests = await repo.list_worker_connection_requests()
         events = await repo.list_worker_events()
@@ -76,7 +77,7 @@ class LocalWorkerService:
             "workers": [self._public_worker(worker) for worker in workers],
             "requests": [self._public_request(item) for item in requests],
             "events": [to_jsonable(event) for event in events[:50]],
-            "jobs": [to_jsonable(job) for job in jobs[:30]],
+            "jobs": [job_to_jsonable(job) for job in jobs[:30]],
             "sqs": {
                 "commands_configured": bool(settings.worker_command_queue_url),
                 "events_configured": bool(settings.worker_event_queue_url),
@@ -103,7 +104,7 @@ class LocalWorkerService:
             platform=request.platform,
             engine=request.engine,
             capabilities=request.capabilities,
-            config={**request.requested_config, "autonomy": request.requested_config.get("autonomy", "branch_pr")},
+            config={**request.requested_config, "autonomy": request.requested_config.get("autonomy", "autonomous_development")},
             api_token_hash=hash_token(token),
         )
         await get_repository().save_local_worker(worker)
@@ -125,7 +126,12 @@ class LocalWorkerService:
         worker = await self._worker_or_404(worker_id)
         worker.status = "revoked"
         worker.api_token_hash = None
-        await get_repository().save_local_worker(worker)
+        repo = get_repository()
+        await repo.save_local_worker(worker)
+        lease = await repo.get_worker_credential_lease(worker_id)
+        if lease:
+            lease.expires_at = utcnow()
+            await repo.save_worker_credential_lease(lease)
         return {"worker": self._public_worker(worker)}
 
     async def rotate_credentials(self, worker_id: str) -> dict[str, Any]:
@@ -155,6 +161,9 @@ class LocalWorkerService:
         return event
 
     async def process_worker_event(self, worker_id: str, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+        worker = await self._worker_or_404(worker_id)
+        if worker.status != "approved":
+            raise PermissionError("Worker is not approved")
         await self.record_event(worker_id, event_type, payload, payload.get("work_item_id"))
         project_service = ProjectTwinService()
         if event_type == "heartbeat":
@@ -163,7 +172,13 @@ class LocalWorkerService:
                 return {"job": await project_service.heartbeat_job(payload["work_item_id"], payload["claim_token"], worker_id, payload.get("logs", ""))}
             return {"ok": True}
         if event_type == "job_completed":
-            job_result = await project_service.complete_job(payload["work_item_id"], payload["claim_token"], worker_id, payload.get("result") or {}, payload.get("logs", ""))
+            result = dict(payload.get("result") or {})
+            for key in ("engine", "model", "agent_name", "command"):
+                if payload.get(key) and key not in result:
+                    result[key] = payload[key]
+            if payload.get("branch_name") and "branch_name" not in result:
+                result["branch_name"] = payload["branch_name"]
+            job_result = await project_service.complete_job(payload["work_item_id"], payload["claim_token"], worker_id, result, payload.get("logs", ""))
             await self._orchestrate_factory(payload.get("work_item_id"), "completed")
             return {"job": job_result}
         if event_type == "job_failed":
@@ -184,15 +199,19 @@ class LocalWorkerService:
 
     async def process_sqs_records(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         processed = 0
+        rejected = 0
         for record in records:
-            body = json.loads(record.get("body") or "{}")
-            await self.process_worker_event(
-                body.get("worker_id") or "unknown",
-                body.get("type") or body.get("event_type") or "unknown",
-                body.get("payload") or body,
-            )
-            processed += 1
-        return {"processed": processed}
+            try:
+                body = json.loads(record.get("body") or "{}")
+                await self.process_worker_event(
+                    body.get("worker_id") or "unknown",
+                    body.get("type") or body.get("event_type") or "unknown",
+                    body.get("payload") or body,
+                )
+                processed += 1
+            except (PermissionError, ValueError, json.JSONDecodeError):
+                rejected += 1
+        return {"processed": processed, "rejected": rejected}
 
     async def _heartbeat_worker(self, worker_id: str) -> None:
         worker = await get_repository().get_local_worker(worker_id)

@@ -11,6 +11,9 @@ $ARGUMENTS
 
 ## Analysis Steps
 
+### 0. Read the routing config
+Read `.opencode/agent-skills.json` to load the skill routing table. This is needed so the diagnostic can report which skills would be matched for each potential subtask.
+
 ### 1. Identify affected files
 Based on the task description, what files would likely need to be created or modified?
 
@@ -39,6 +42,8 @@ Would multiple workers need to edit the same file? Check for:
 ### 4. Evaluate decomposability
 Can the task be split into independent subtasks with disjoint write scopes?
 
+For each potential subtask, run the **trigger-scoring algorithm from `/route`** against `agent-skills.json` to determine which skill and subagent would be assigned. Report this in the diagnostic so the user knows the full routing picture before deciding to parallelize.
+
 ### 5. Produce diagnostic
 
 ```
@@ -59,13 +64,13 @@ Can the task be split into independent subtasks with disjoint write scopes?
 
 ## Decomposition Options
 1. [Option A]: [worker split description]
-   - Worker 1 writes: [paths]
-   - Worker 2 writes: [paths]
+   - Worker 1 writes: [paths], subtask: "..." → triggers: [matched] → skill: X → agent: Y
+   - Worker 2 writes: [paths], subtask: "..." → triggers: [matched] → skill: X → agent: Y
    - Overlap: [none/file X]
 
 2. [Option B]: [alternative split]
-   - Worker 1 writes: [paths]
-   - Worker 2 writes: [paths]
+   - Worker 1 writes: [paths], subtask: "..." → triggers: [matched] → skill: X → agent: Y
+   - Worker 2 writes: [paths], subtask: "..." → triggers: [matched] → skill: X → agent: Y
    - Overlap: [none/file X]
 
 ## Verdict

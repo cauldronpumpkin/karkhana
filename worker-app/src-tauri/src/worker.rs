@@ -444,7 +444,6 @@ async fn run_server_with_breaker(
     );
     let cancelled = Arc::new(AtomicBool::new(false));
     let _breaker_cancelled = cancelled.clone();
-
     let session_id = session.id.clone();
     let client_clone = opencode_client.clone();
     let policy = PermissionPolicy::default();

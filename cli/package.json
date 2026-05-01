@@ -1,0 +1,22 @@
+{
+  "name": "karkhana",
+  "version": "0.1.0",
+  "description": "Karkhana local node runtime launcher shim",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=14.18.0"
+  },
+  "bin": {
+    "karkhana": "./bin/karkhana.js"
+  },
+  "scripts": {
+    "test": "node ./bin/karkhana.js version"
+  },
+  "keywords": [
+    "karkhana",
+    "cli",
+    "local-node"
+  ],
+  "license": "UNLICENSED",
+  "private": true
+}

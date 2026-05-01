@@ -17,7 +17,7 @@
   }
   async function gwPost(path, body) { return gwApi(path, { method: 'POST', body: JSON.stringify(body) }); }
 
-  let state = $state({ workers: [], requests: [], events: [] });
+  let state = $state({ workers: [], requests: [], events: [], jobs: [] });
   let isLoading = $state(true);
   let isActing = $state('');
   let error = $state('');
@@ -27,6 +27,8 @@
 
   let pendingRequests = $derived(state.requests.filter((r) => r.status === 'pending'));
   let approvedWorkers = $derived(state.workers.filter((w) => w.status === 'approved'));
+  let activeJobs = $derived((state.jobs || []).filter((j) => ['queued', 'waiting_for_machine', 'failed_retryable', 'claimed', 'running'].includes(j.status)));
+  let failedJobs = $derived((state.jobs || []).filter((j) => j.status?.includes('failed')));
 
   async function loadWorkers() {
     isLoading = true; error = '';
@@ -104,6 +106,33 @@
     return v ? new Date(v).toLocaleString() : 'never';
   }
 
+  function workerLabel(job) {
+    return job.worker_state?.worker_id || job.worker_id || 'unclaimed';
+  }
+
+  function jobHeartbeatLabel(job) {
+    const heartbeat = job.worker_state?.heartbeat_at || job.heartbeat_at;
+    if (job.execution_state?.is_stale) return 'heartbeat expired';
+    return heartbeat ? `heartbeat ${fmtDate(heartbeat)}` : `updated ${fmtDate(job.updated_at)}`;
+  }
+
+  function opencodeSummary(job) {
+    const details = job.opencode || {};
+    return [details.engine || job.engine, details.model || job.model, details.agent || job.agent_name].filter(Boolean).join(' · ');
+  }
+
+  function branchLabel(job) {
+    return job.branch_name || job.opencode?.branch_name || job.payload?.branch || job.payload?.branch_name || '';
+  }
+
+  function promptPreview(job) {
+    return job.opencode?.prompt_preview || job.payload?.prompt || job.payload?.role_prompt || job.payload?.codex_prompt || '';
+  }
+
+  function resultSummary(job) {
+    return job.result?.agent_output || job.result?.summary || JSON.stringify(job.result, null, 2);
+  }
+
   onMount(loadWorkers);
 </script>
 
@@ -155,7 +184,7 @@
     <article><span>Approved</span><strong>{approvedWorkers.length}</strong><small>Ready for coding work</small></article>
     <article><span>Pending</span><strong>{pendingRequests.length}</strong><small>Awaiting approval</small></article>
     <article><span>Total</span><strong>{state.workers.length}</strong><small>Registered machines</small></article>
-    <article><span>API</span><strong>Live</strong><small>API Gateway</small></article>
+    <article><span>Jobs</span><strong>{activeJobs.length}</strong><small>{failedJobs.length} failed/retryable</small></article>
   </section>
 
   <div class="workspace">
@@ -221,12 +250,80 @@
         <div class="empty">No workers connected yet. Generate an invite link above to get started.</div>
       {/if}
     </section>
+
+    <section class="panel">
+      <header>
+        <h2><TerminalSquare size={18} /> Worker Jobs</h2>
+        <Badge variant={activeJobs.length ? 'warning' : 'muted'}>{state.jobs?.length || 0}</Badge>
+      </header>
+      {#if failedJobs.length}
+        <div class="failed-callout">
+          <strong>{failedJobs.length} failed or retryable job{failedJobs.length === 1 ? '' : 's'}</strong>
+          <p>Review the error, logs, and OpenCode debug prompt before re-running.</p>
+        </div>
+      {/if}
+      {#if state.jobs?.length}
+        <div class="row-list">
+          {#each state.jobs as job}
+            <article class="job-row">
+              <div>
+                <strong>{job.job_type}</strong>
+                <small>{job.status} &middot; priority {job.priority ?? job.execution_state?.priority ?? 50} &middot; {workerLabel(job)}</small>
+                <small>{jobHeartbeatLabel(job)} &middot; retries {job.retry_count || 0}</small>
+                {#if job.error}<span class="job-error">{job.error}</span>{/if}
+                {#if opencodeSummary(job)}<span class="job-meta">OpenCode: {opencodeSummary(job)}</span>{/if}
+                {#if branchLabel(job)}<span class="job-meta">Branch: {branchLabel(job)}</span>{/if}
+                {#if job.command || job.opencode?.command}
+                  <details>
+                    <summary>OpenCode command</summary>
+                    <pre>{job.command || job.opencode.command}</pre>
+                  </details>
+                {/if}
+                {#if promptPreview(job)}
+                  <details>
+                    <summary>OpenCode prompt</summary>
+                    <pre>{promptPreview(job)}</pre>
+                  </details>
+                {/if}
+                {#if job.logs_tail}
+                  <details>
+                    <summary>Logs</summary>
+                    <pre>{job.logs_tail}</pre>
+                  </details>
+                {/if}
+                {#if job.result}
+                  <details>
+                    <summary>Result</summary>
+                    <pre>{resultSummary(job)}</pre>
+                  </details>
+                {/if}
+                {#if job.debug_prompt}
+                  <details>
+                    <summary>Debug follow-up</summary>
+                    <pre>{job.debug_prompt}</pre>
+                  </details>
+                {/if}
+                {#if job.error && promptPreview(job)}
+                  <details>
+                    <summary>Suggested OpenCode retry prompt</summary>
+                    <pre>{job.debug_prompt || promptPreview(job)}</pre>
+                  </details>
+                {/if}
+              </div>
+              <Badge variant={statusTone(job.status)}>{job.execution_state?.category || job.status}</Badge>
+            </article>
+          {/each}
+        </div>
+      {:else}
+        <div class="empty">No worker jobs have been queued yet.</div>
+      {/if}
+    </section>
   </div>
 </div>
 
 <style>
   .workers-page { margin: 0 auto; max-width: 1240px; }
-  .hero, .panel header, .worker-row, .request-row { align-items: flex-start; display: flex; gap: var(--spacing-md); justify-content: space-between; }
+  .hero, .panel header, .worker-row, .request-row, .job-row { align-items: flex-start; display: flex; gap: var(--spacing-md); justify-content: space-between; }
   .hero { margin-bottom: var(--spacing-lg); }
   .hero h1 { color: var(--color-text); font-size: 2.2rem; line-height: 1; margin: var(--spacing-xs) 0; }
   .hero p, .panel p, .panel small, .request-row span, .worker-row span { color: var(--color-text-secondary); }
@@ -248,8 +345,22 @@
   .link-output code { background: rgba(0, 0, 0, 0.28); border: 1px solid rgba(103, 128, 151, 0.2); border-radius: var(--border-radius-md); color: var(--color-success); flex: 1; font-family: var(--font-mono); font-size: 0.74rem; overflow-x: auto; padding: var(--spacing-sm); white-space: pre-wrap; }
   .hint { color: var(--color-text-secondary); font-size: 0.78rem; margin: 0; }
   .row-list { display: grid; gap: 10px; }
-  .request-row, .worker-row, .empty { background: rgba(3, 8, 12, 0.48); border: 1px solid rgba(103, 128, 151, 0.18); border-radius: var(--border-radius-md); padding: var(--spacing-md); }
-  .request-row strong, .request-row small, .request-row span, .worker-row strong, .worker-row small, .worker-row span { display: block; }
+  .request-row, .worker-row, .job-row, .empty { background: rgba(3, 8, 12, 0.48); border: 1px solid rgba(103, 128, 151, 0.18); border-radius: var(--border-radius-md); padding: var(--spacing-md); }
+  .request-row strong, .request-row small, .request-row span, .worker-row strong, .worker-row small, .worker-row span, .job-row strong, .job-row small, .job-row span { display: block; }
+  .job-error { color: var(--color-error) !important; }
+  .job-meta { color: var(--color-primary-2) !important; }
+  .failed-callout {
+    background: rgba(255, 61, 79, 0.08);
+    border: 1px solid rgba(255, 61, 79, 0.24);
+    border-radius: var(--border-radius-md);
+    color: var(--color-text-secondary);
+    margin-bottom: 10px;
+    padding: var(--spacing-sm) var(--spacing-md);
+  }
+  .failed-callout strong { color: var(--color-error); display: block; }
+  details { margin-top: 6px; }
+  summary { color: var(--color-primary-2); cursor: pointer; font-size: 0.8rem; }
+  pre { background: rgba(0, 0, 0, 0.26); border-radius: var(--border-radius-sm); color: var(--color-text-secondary); font-size: 0.72rem; margin: 6px 0 0; max-height: 180px; overflow: auto; padding: 8px; white-space: pre-wrap; }
   .empty { color: var(--color-text-secondary); min-height: 64px; }
   .notice.error { border-color: rgba(255, 61, 79, 0.42); color: var(--color-error); margin-bottom: var(--spacing-lg); }
   .spin { animation: spin 1s linear infinite; }

@@ -289,6 +289,7 @@ class WorkItem:
     result: dict | None = None
     error: str | None = None
     branch_name: str | None = None
+    agent_run_id: str | None = None
     ledger_policy: str = "none"
     ledger_path: str | None = None
     created_at: datetime = field(default_factory=utcnow)
@@ -306,6 +307,8 @@ class AgentRun:
     engine: str
     agent_name: str | None = None
     model: str | None = None
+    command: str | None = None
+    branch_name: str | None = None
     status: str = "running"
     prompt: str = ""
     output: str = ""
@@ -333,7 +336,7 @@ class LocalWorker:
     display_name: str
     machine_name: str
     platform: str
-    engine: str = "openclaude"
+    engine: str = "opencode"
     status: str = "approved"
     capabilities: list[str] = field(default_factory=list)
     config: dict = field(default_factory=dict)
@@ -349,7 +352,7 @@ class WorkerConnectionRequest:
     display_name: str
     machine_name: str
     platform: str
-    engine: str = "openclaude"
+    engine: str = "opencode"
     capabilities: list[str] = field(default_factory=list)
     requested_config: dict = field(default_factory=dict)
     status: str = "pending"
@@ -2079,19 +2082,19 @@ class DynamoDBRepository(Repository):
         )
 
     def _work_item(self, item: dict[str, Any]) -> WorkItem:
-        return WorkItem(id=item["id"], idea_id=item["idea_id"], project_id=item["project_id"], job_type=item["job_type"], payload=item.get("payload") or {}, status=item.get("status", "queued"), priority=int(item.get("priority", 50)), factory_run_id=item.get("factory_run_id"), parent_work_item_id=item.get("parent_work_item_id"), rationale=item.get("rationale"), correlation_id=item.get("correlation_id"), dedupe_hash=item.get("dedupe_hash"), budget=item.get("budget") or {}, stop_conditions=item.get("stop_conditions") or [], idempotency_key=item.get("idempotency_key"), worker_id=item.get("worker_id"), claim_token=item.get("claim_token"), claimed_at=_dt(item.get("claimed_at")), heartbeat_at=_dt(item.get("heartbeat_at")), run_after=_dt(item.get("run_after")), retry_count=int(item.get("retry_count", 0)), timeout_seconds=int(item.get("timeout_seconds", 900)), logs=item.get("logs", ""), logs_pointer=item.get("logs_pointer"), result=item.get("result"), error=item.get("error"), branch_name=item.get("branch_name"), ledger_policy=item.get("ledger_policy", "none"), ledger_path=item.get("ledger_path"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
+        return WorkItem(id=item["id"], idea_id=item["idea_id"], project_id=item["project_id"], job_type=item["job_type"], payload=item.get("payload") or {}, status=item.get("status", "queued"), priority=int(item.get("priority", 50)), factory_run_id=item.get("factory_run_id"), parent_work_item_id=item.get("parent_work_item_id"), rationale=item.get("rationale"), correlation_id=item.get("correlation_id"), dedupe_hash=item.get("dedupe_hash"), budget=item.get("budget") or {}, stop_conditions=item.get("stop_conditions") or [], idempotency_key=item.get("idempotency_key"), worker_id=item.get("worker_id"), claim_token=item.get("claim_token"), claimed_at=_dt(item.get("claimed_at")), heartbeat_at=_dt(item.get("heartbeat_at")), run_after=_dt(item.get("run_after")), retry_count=int(item.get("retry_count", 0)), timeout_seconds=int(item.get("timeout_seconds", 900)), logs=item.get("logs", ""), logs_pointer=item.get("logs_pointer"), result=item.get("result"), error=item.get("error"), branch_name=item.get("branch_name"), agent_run_id=item.get("agent_run_id"), ledger_policy=item.get("ledger_policy", "none"), ledger_path=item.get("ledger_path"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
 
     def _agent_run(self, item: dict[str, Any]) -> AgentRun:
-        return AgentRun(id=item["id"], work_item_id=item["work_item_id"], idea_id=item["idea_id"], project_id=item["project_id"], engine=item["engine"], agent_name=item.get("agent_name"), model=item.get("model"), status=item.get("status", "running"), prompt=item.get("prompt", ""), output=item.get("output", ""), started_at=_dt(item.get("started_at")) or utcnow(), completed_at=_dt(item.get("completed_at")))
+        return AgentRun(id=item["id"], work_item_id=item["work_item_id"], idea_id=item["idea_id"], project_id=item["project_id"], engine=item["engine"], agent_name=item.get("agent_name"), model=item.get("model"), command=item.get("command"), status=item.get("status", "running"), prompt=item.get("prompt", ""), output=item.get("output", ""), started_at=_dt(item.get("started_at")) or utcnow(), completed_at=_dt(item.get("completed_at")))
 
     def _project_commit(self, item: dict[str, Any]) -> ProjectCommit:
         return ProjectCommit(id=item["id"], idea_id=item["idea_id"], project_id=item["project_id"], work_item_id=item["work_item_id"], branch_name=item["branch_name"], commit_sha=item["commit_sha"], message=item["message"], author=item.get("author"), status=item.get("status", "pushed"), created_at=_dt(item.get("created_at")) or utcnow())
 
     def _local_worker(self, item: dict[str, Any]) -> LocalWorker:
-        return LocalWorker(id=item["id"], display_name=item["display_name"], machine_name=item["machine_name"], platform=item["platform"], engine=item.get("engine", "openclaude"), status=item.get("status", "approved"), capabilities=item.get("capabilities") or [], config=item.get("config") or {}, api_token_hash=item.get("api_token_hash"), last_seen_at=_dt(item.get("last_seen_at")), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
+        return LocalWorker(id=item["id"], display_name=item["display_name"], machine_name=item["machine_name"], platform=item["platform"], engine=item.get("engine", "opencode"), status=item.get("status", "approved"), capabilities=item.get("capabilities") or [], config=item.get("config") or {}, api_token_hash=item.get("api_token_hash"), last_seen_at=_dt(item.get("last_seen_at")), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
 
     def _worker_connection_request(self, item: dict[str, Any]) -> WorkerConnectionRequest:
-        return WorkerConnectionRequest(id=item["id"], display_name=item["display_name"], machine_name=item["machine_name"], platform=item["platform"], engine=item.get("engine", "openclaude"), capabilities=item.get("capabilities") or [], requested_config=item.get("requested_config") or {}, status=item.get("status", "pending"), worker_id=item.get("worker_id"), decision_reason=item.get("decision_reason"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
+        return WorkerConnectionRequest(id=item["id"], display_name=item["display_name"], machine_name=item["machine_name"], platform=item["platform"], engine=item.get("engine", "opencode"), capabilities=item.get("capabilities") or [], requested_config=item.get("requested_config") or {}, status=item.get("status", "pending"), worker_id=item.get("worker_id"), decision_reason=item.get("decision_reason"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
 
     def _worker_credential_lease(self, item: dict[str, Any]) -> WorkerCredentialLease:
         return WorkerCredentialLease(id=item["id"], worker_id=item["worker_id"], api_token_hash=item["api_token_hash"], access_key_id=item.get("access_key_id", ""), secret_access_key=item.get("secret_access_key", ""), session_token=item.get("session_token", ""), expires_at=_dt(item.get("expires_at")) or utcnow(), command_queue_url=item.get("command_queue_url", ""), event_queue_url=item.get("event_queue_url", ""), region=item.get("region", "us-east-1"), created_at=_dt(item.get("created_at")) or utcnow())

@@ -46,6 +46,11 @@ class JobUpdateRequest(BaseModel):
 
 class JobCompleteRequest(JobUpdateRequest):
     result: dict = Field(default_factory=dict)
+    engine: str | None = None
+    model: str | None = None
+    agent_name: str | None = None
+    command: str | None = None
+    branch_name: str | None = None
 
 
 class JobFailRequest(JobUpdateRequest):
@@ -104,7 +109,12 @@ async def heartbeat_job(job_id: str, body: JobUpdateRequest, x_idearefinery_work
 async def complete_job(job_id: str, body: JobCompleteRequest, x_idearefinery_worker_token: str | None = Header(default=None), authorization: str | None = Header(default=None)):
     await verify_worker(body.worker_id, x_idearefinery_worker_token, authorization)
     try:
-        return {"job": await get_service().complete_job(job_id, body.claim_token, body.worker_id, body.result, body.logs)}
+        result = dict(body.result or {})
+        for key in ("engine", "model", "agent_name", "command", "branch_name"):
+            value = getattr(body, key)
+            if value and key not in result:
+                result[key] = value
+        return {"job": await get_service().complete_job(job_id, body.claim_token, body.worker_id, result, body.logs)}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

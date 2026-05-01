@@ -55,15 +55,15 @@ OpenCode exposes a permission-request flow over HTTP:
 1. Agent execution generates `permissionRequest` objects inside message `parts`.
 2. Each request has `id`, `tool`, and `input`.
 3. The caller must POST `response: "allow" | "deny"` to `/session/{id}/permissions/{perm_id}`.
-4. CLI flag `--dangerously-skip-permissions` exists but is **not used** by Karkhana workers.
+4. CLI fallback execution uses `--dangerously-skip-permissions` by default so local workers do not block on interactive approval prompts.
 
-The worker-app implements a `run_permission_guard` task (`sandbox.rs`) that polls messages every 5 seconds and auto-responds based on a local `PermissionPolicy`:
+The worker-app keeps a `run_permission_guard` implementation (`sandbox.rs`) for reference/future policy modes, but default YOLO execution does **not** spawn the guard. The retained guard can auto-respond based on a local `PermissionPolicy`:
 
 - `allow_file_edits`: bool
 - `allow_shell_commands`: list of command prefixes
 - `deny_patterns`: list of forbidden substrings
 
-This guard is **local policy**, not OpenCode-native policy.
+This guard is **local policy**, not OpenCode-native policy, and is currently bypassed by default.
 
 ### 1.5 Circuit Breaker
 
@@ -214,11 +214,11 @@ Because OpenCode's HTTP API does not support per-task system prompts or skill fi
      - Ensure `opencode serve` is running (or attach to `opencode_server_url`).
      - Create session via POST `/session`.
      - Send prompt via POST `/session/{id}/message`.
-     - Spawn `CircuitBreaker` watcher and `PermissionPolicy` guard as concurrent tasks.
+      - Spawn the `CircuitBreaker` watcher. Default YOLO mode does not spawn the `PermissionPolicy` guard.
      - On success, GET `/session/{id}/diff` to capture changes.
      - DELETE `/session/{id}` to clean up.
    - If `engine == "opencode"` (CLI fallback):
-     - Run `opencode run <prompt>` in repo directory.
+      - Run `opencode run --dangerously-skip-permissions <prompt>` in repo directory.
      - Capture stdout/stderr.
    - If `engine == "openclaude"` (legacy):
      - Run `openclaude -p <prompt>` with appropriate flags.
@@ -256,7 +256,7 @@ Because OpenCode's HTTP API does not support per-task system prompts or skill fi
 | Agent non-zero exit / session error | `job_failed` with `retryable: true` (unless circuit breaker) | `failed_retryable` status; retried up to `IDEAREFINERY_WORKER_MAX_RETRIES` |
 | Circuit breaker triggered | `job_failed` with `retryable: false`, `circuit_breaker_triggered` reason | `failed_terminal`; may trigger repair flow if `can_auto_repair` |
 | Tests fail | `job_completed` with `tests_passed: false` | `FactoryOrchestrator` runs `process_verification_result`; may block, repair, or advance |
-| Permission denied by policy | Worker auto-denies via guard; agent may halt | Treated as agent error, retryable |
+| Permission prompt stalls | Default YOLO mode skips permission prompts; non-YOLO policy modes may auto-deny via guard | Treated as agent error, retryable |
 | TTL / budget / token limit | Circuit breaker aborts session | Non-retryable failure |
 
 ### 3.7 Graphify Read / Update Requirements
@@ -277,12 +277,12 @@ The `verification_commands` array always includes `graphify update .` unless exp
 
 | Engine | `opencode_client` | `litellm` | Permission Guard | Circuit Breaker | Diff API |
 |--------|-------------------|-----------|------------------|-----------------|----------|
-| `opencode-server` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `opencode` (CLI) | ❌ | ❌ | ❌ | ❌ | ❌ (git diff fallback) |
+| `opencode-server` | ✅ | ✅ | ❌ default YOLO | ✅ | ✅ |
+| `opencode` (CLI) | ❌ | ❌ | ❌ default YOLO flag | ❌ | ❌ (git diff fallback) |
 | `openclaude` (CLI) | ❌ | ❌ | ❌ | ❌ | ❌ (git diff fallback) |
 | `codex` (CLI fallback) | ❌ | ❌ | ❌ | ❌ | ❌ (git diff fallback) |
 
-**Product direction:** `opencode-server` is the target mode. CLI fallbacks exist for resilience but do not support the full contract (no circuit breaker, no permission guard, no structured diff API).
+**Product direction:** `opencode-server` is the target mode. CLI fallbacks exist for resilience but do not support the full contract (no circuit breaker, no structured diff API). OpenCode execution defaults to YOLO permissions to avoid unattended worker stalls.
 
 ---
 
@@ -290,7 +290,7 @@ The `verification_commands` array always includes `graphify update .` unless exp
 
 ### 5.1 Worker-Side Policy (`sandbox.rs`)
 
-The worker implements a **best-effort** permission guard. It is not a true sandbox:
+The worker retains a **best-effort** permission guard implementation for future non-YOLO policy modes. It is not a true sandbox, and it is not active in the default YOLO path:
 
 - File edits allowed only within repo directory.
 - Shell commands allowed only if prefix-matched to allow-list (`git`, `npm test`, `npm run`, `python -m pytest`, `cargo test`, `go test`).
@@ -306,7 +306,7 @@ The backend appends universal guardrails to every worker contract:
 - Never commit secrets, API keys, or credentials.
 - Never run destructive database changes.
 
-These are **instructional**, not enforceable by the backend. Enforcement relies on the worker's `PermissionPolicy` and `AGENTS.md`.
+These are **instructional**, not enforceable by the backend. Default enforcement relies on worker credentials, circuit breakers, branch isolation, post-run verification, and `AGENTS.md` instructions rather than interactive OpenCode permission prompts.
 
 ---
 

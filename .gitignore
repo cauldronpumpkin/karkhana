@@ -15,3 +15,5 @@ coverage/
 *.log
 litellm.pid
 graphify-out/cache/
+node/bin/
+artifacts/

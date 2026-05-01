@@ -1,0 +1,30 @@
+{
+  "job_id": "mock-job-001",
+  "repo_root": ".",
+  "worktree_path": ".",
+  "task_title": "Run test suite for Karigar MVP",
+  "task_prompt": "Run the configured verification commands and produce a compact review report.",
+  "command": "python -m pytest",
+  "verification_commands": [
+    "python -m pytest -q",
+    "python -m ruff check ."
+  ],
+  "metadata": {
+    "title": "Run test suite for Karigar MVP",
+    "requested_by": "documentation-example",
+    "notes": "Mock job used to demonstrate the local runner contract."
+  },
+  "job_type": "mock",
+  "args": [
+    "-q"
+  ],
+  "env": {
+    "CI": "1"
+  },
+  "allow_network": false,
+  "allow_git_write": false,
+  "payload": {
+    "scope": "tests",
+    "priority": "normal"
+  }
+}

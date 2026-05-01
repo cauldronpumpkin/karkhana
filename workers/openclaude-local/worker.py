@@ -268,7 +268,7 @@ class LocalWorker:
         if self.config.engine == "openclaude" and shutil.which("openclaude"):
             return self._run(OpenClaudeAdapter(self.config.openclaude).command(prompt), repo_dir, logs, check=False)
         if self.config.engine == "opencode" and shutil.which("opencode"):
-            return self._run(["opencode", "run", prompt], repo_dir, logs, check=False)
+            return self._run(["opencode", "run", "--dangerously-skip-permissions", prompt], repo_dir, logs, check=False)
         if shutil.which("codex"):
             return self._run(["codex", "exec", "-C", str(repo_dir), prompt], repo_dir, logs, check=False)
         logs.append("No local coding engine found; returning deterministic fallback.")

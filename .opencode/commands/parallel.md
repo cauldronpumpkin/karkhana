@@ -50,10 +50,27 @@ Show the user:
 
 Create a fan-out plan with explicit file ownership for each worker.
 
+### Step 2a: Read the routing config
+Read `.opencode/agent-skills.json` to load the skill routing table with triggers, subagent mappings, and review chains.
+
+### Step 2b: Skill-aware subtask routing
+For each subtask you decompose from the user's task, run the **same trigger-scoring algorithm as `/route`**:
+1. Match the subtask description against trigger keywords for each skill in `agent-skills.json`
+2. Score each skill by number of trigger matches
+3. Pick the highest-scoring skill for that subtask
+4. Use the skill's mapped `subagent`, `review_subagent`, and `escalation_subagent`
+
+This ensures every parallel worker gets the correct skill + agent combo — not guessed.
+
+Example: If the task is "Add tags: backend CRUD API and frontend tag editor":
+- Subtask "backend CRUD API" → triggers match `fastapi-expert` (score: 5) → `coder-cheap`
+- Subtask "frontend tag editor" → triggers match `frontend-design` (score: 3) → `coder-cheap`
+
+### Step 2c: Define worker specs
 For each worker, define:
 - **ID**: unique task identifier (e.g., `frontend-ui`, `backend-api`, `tests`)
-- **Agent**: which subagent to use (coder-cheap, explore-cheap, etc.)
-- **Skill**: which skill to load (if any)
+- **Agent**: from skill routing result (not guessed)
+- **Skill**: from skill routing result (not guessed)
 - **Objective**: what to implement
 - **Read paths**: what the worker may inspect
 - **Write paths**: what the worker may edit (MUST be disjoint across workers)
@@ -70,6 +87,10 @@ Show the user the plan in a table:
 
 | ID | Agent | Skill | Objective | Write Paths |
 |---|---|---|---|---|
+
+🎯 Skill Routing Detail:
+  Worker <id>: task="..." → triggers: [matched] → skill: X → agent: Y
+  Worker <id>: task="..." → triggers: [matched] → skill: X → agent: Y
 ```
 
 ## Phase 3: Parallel Dispatch

@@ -12,26 +12,26 @@ $ARGUMENTS
 ## Steps
 
 ### 1. Read the routing config
-Read `.opencode/agent-skills.json` to understand available skills and subagent mappings.
+Read `.opencode/agent-skills.json` to load the skill routing table with triggers, subagent mappings, and review chains.
 
-### 2. Analyze the task for parallelism
+### 2. Skill-aware task decomposition
+For each subtask you identify, run the **same trigger-scoring algorithm as `/route`**:
+1. Match the subtask description against trigger keywords for each skill in `agent-skills.json`
+2. Score each skill by number of trigger matches
+3. Pick the highest-scoring skill for that subtask
+4. Use the skill's mapped `subagent`, `review_subagent`, and `escalation_subagent`
+
+This ensures every worker gets the correct skill + agent combo — not guessed.
+
+### 3. Analyze the task for parallelism
 - Can the task be decomposed into independent subtasks?
 - What are the natural boundaries (frontend/backend, different modules, different files)?
 
-### 3. Check for serialization boundaries
+### 4. Check for serialization boundaries
 Read `graphify-out/GRAPH_REPORT.md` and identify god nodes that would block parallelism.
+Use the live god node list from the report, not hardcoded values.
 
-God nodes in this project:
-- `InMemoryRepository` (155 edges)
-- `DynamoDBRepository` (140 edges)
-- `FileManager` (120 edges)
-- `FactoryRunService` (124 edges)
-- `Repository` (99 edges)
-- `get_repository()` (99 edges)
-- `FactoryRun` (95 edges)
-- `ProjectTwinService` (90 edges)
-
-### 4. Produce the plan
+### 5. Produce the plan
 
 Show the user:
 
@@ -53,10 +53,16 @@ Show the user:
 
 ### Wave 1: Implementation (parallel)
 
-| ID | Agent | Skill | Objective | Write Paths | Forbidden Paths | Validation |
-|---|---|---|---|---|---|---|
-| worker-1 | coder-cheap | [skill] | [objective] | [paths] | [paths] | [command] |
-| worker-2 | coder-cheap | [skill] | [objective] | [paths] | [paths] | [command] |
+| ID | Agent | Skill | Trigger Score | Objective | Write Paths | Forbidden Paths | Validation |
+|---|---|---|---|---|---|---|---|
+| worker-1 | [from routing] | [from routing] | [N matches] | [objective] | [paths] | [paths] | [command] |
+| worker-2 | [from routing] | [from routing] | [N matches] | [objective] | [paths] | [paths] | [command] |
+
+**Skill routing detail for each worker:**
+```
+Worker worker-1: task="..." → matched triggers: [list] → skill: X → subagent: Y
+Worker worker-2: task="..." → matched triggers: [list] → skill: X → subagent: Y
+```
 
 ### Wave 2: Verification (parallel, read-only)
 

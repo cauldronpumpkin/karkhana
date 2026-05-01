@@ -21,7 +21,7 @@ class WorkerRegisterRequest(BaseModel):
     display_name: str | None = None
     machine_name: str = Field(..., min_length=1)
     platform: str = Field(..., min_length=1)
-    engine: str = "openclaude"
+    engine: str = "opencode"
     capabilities: list[str] = Field(default_factory=lambda: DEFAULT_CAPABILITIES.copy())
     config: dict = Field(default_factory=dict)
     tenant_id: str | None = None

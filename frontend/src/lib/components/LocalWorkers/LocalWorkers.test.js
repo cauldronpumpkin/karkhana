@@ -31,7 +31,23 @@ const dashboard = {
     },
   ],
   events: [],
-  jobs: [{ id: 'job-1', status: 'queued' }],
+  jobs: [{
+    id: 'job-1',
+    job_type: 'agent_branch_work',
+    status: 'failed_retryable',
+    priority: 40,
+    retry_count: 1,
+    worker_state: { worker_id: 'worker-1' },
+    engine: 'opencode',
+    model: 'gpt-test',
+    agent_name: 'build',
+    command: 'opencode run --dangerously-skip-permissions <prompt>',
+    branch_name: 'factory/job-1/fix',
+    payload: { prompt: 'Fix the worker bridge' },
+    error: 'worker command failed',
+    debug_prompt: 'Debug this failed Idea Refinery local-worker job in OpenCode.',
+    result: { agent_output: 'partial output' },
+  }],
   sqs: { commands_configured: true, events_configured: true, region: 'us-east-1' },
 };
 
@@ -62,6 +78,18 @@ describe('LocalWorkers', () => {
     });
 
     expect(screen.getByText('Worker management')).toBeInTheDocument();
+  });
+
+  it('renders OpenCode job diagnostics', async () => {
+    render(LocalWorkers);
+
+    expect((await screen.findAllByText('agent_branch_work')).length).toBeGreaterThan(0);
+    expect(screen.getByText(/OpenCode: opencode · gpt-test · build/i)).toBeInTheDocument();
+    expect(screen.getByText(/Branch: factory\/job-1\/fix/i)).toBeInTheDocument();
+    expect(screen.getByText(/worker command failed/i)).toBeInTheDocument();
+    expect(screen.getByText(/OpenCode command/i)).toBeInTheDocument();
+    expect(screen.getByText(/Debug follow-up/i)).toBeInTheDocument();
+    expect(screen.getByText(/failed or retryable job/i)).toBeInTheDocument();
   });
 
   it('approves a worker request', async () => {

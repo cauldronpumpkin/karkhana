@@ -138,6 +138,7 @@ async def test_worker_context_bundle_and_scaffold_manifest_are_compact_and_stabl
     assert bundle["factory_batch_id"] == payload["factory_batch_id"]
     assert bundle["template_id"] == "bundle-template"
     assert bundle["template_version"] == "1.2.3"
+    assert "test_commands" not in payload
     assert bundle["module_ids"] == ["backend/app"]
     assert bundle["task_type"] == "factory_phase:scaffold"
     assert "backend/app/main.py" in bundle["files_likely_needed"]

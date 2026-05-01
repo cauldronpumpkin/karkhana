@@ -20,9 +20,11 @@ from backend.app.repository import (
     get_repository,
     utcnow,
 )
+from backend.app.services.autonomy import HIGH_AUTONOMY_LEVELS
 from backend.app.services.factory_tracking import collect_factory_run_bundle, refresh_factory_run_tracking_manifest
 from backend.app.services.factory_tracking import normalize_token_economy
 from backend.app.services.factory_run_ledger import extract_compact_ledger_context, validate_ledger_metadata
+from backend.app.services.github_app import GitHubAppService
 from backend.app.services.worker_sqs import WorkerSqsPublisher
 
 CLAIMABLE_STATUSES = {"queued", "waiting_for_machine", "failed_retryable"}
@@ -45,6 +47,9 @@ DEPLOY_HINT_FILES = {
     "template.yaml": "cloudformation",
     "template.yml": "cloudformation",
 }
+_VERIFICATION_FAILURE_STATUSES = {"failed", "timed_out", "blocked"}
+_VERIFICATION_SUCCESS_STATUSES = {"passed", "succeeded", "success", "completed", "ok"}
+_VERIFICATION_RESULT_KEYS = ("verification_results", "verification_checks", "verification_evidence")
 
 
 def _normalize_index_path(path: Any) -> str:
@@ -73,6 +78,253 @@ def to_jsonable(value: Any) -> Any:
     if isinstance(value, list):
         return [to_jsonable(item) for item in value]
     return value
+
+
+def _normalize_command_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, list | tuple | set):
+        values = list(value)
+    else:
+        values = [value]
+    commands: list[str] = []
+    for item in values:
+        command = str(item).strip()
+        if command and command not in commands:
+            commands.append(command)
+    return commands
+
+
+def _normalize_job_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    data = dict(payload or {})
+    if "verification_commands" in data or "test_commands" in data:
+        commands_source = data.get("verification_commands")
+        if commands_source is None:
+            commands_source = data.get("test_commands")
+        data["verification_commands"] = _normalize_command_list(commands_source)
+        data.pop("test_commands", None)
+    return data
+
+
+def _verification_commands_for_payload(payload: dict[str, Any] | None) -> list[str]:
+    payload = payload or {}
+    return _normalize_command_list(payload.get("verification_commands") or payload.get("test_commands"))
+
+
+def _verification_result_entries(result: dict[str, Any]) -> list[dict[str, Any]]:
+    for key in _VERIFICATION_RESULT_KEYS:
+        raw = result.get(key)
+        if isinstance(raw, dict):
+            entries: list[dict[str, Any]] = []
+            for command, value in raw.items():
+                if isinstance(value, dict):
+                    entry = dict(value)
+                    entry.setdefault("command", command)
+                else:
+                    entry = {"command": command, "status": value}
+                entries.append(entry)
+            return entries
+        if isinstance(raw, list):
+            entries = [dict(item) for item in raw if isinstance(item, dict)]
+            if entries:
+                return entries
+    return []
+
+
+def _normalize_verification_status(value: Any) -> str:
+    status = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if status in {"timedout", "timeout"}:
+        return "timed_out"
+    return status
+
+
+def _verification_failure_reason(*, payload: dict[str, Any], result: dict[str, Any], job_type: str) -> str | None:
+    if job_type == "repo_index":
+        return None
+    commands = _verification_commands_for_payload(payload)
+    if not commands:
+        return None
+
+    entries = _verification_result_entries(result)
+    if not entries:
+        if result.get("tests_passed") is False:
+            return "Required verification command failed."
+        return "Required verification evidence is missing."
+
+    evidence_by_command: dict[str, list[str]] = {}
+    for entry in entries:
+        command = str(entry.get("command") or entry.get("name") or entry.get("check") or "").strip()
+        if not command:
+            continue
+        status = _normalize_verification_status(entry.get("status") or entry.get("state") or entry.get("result"))
+        evidence_by_command.setdefault(command, []).append(status)
+
+    missing_commands = [command for command in commands if command not in evidence_by_command]
+    if missing_commands:
+        return f"Required verification evidence is missing for: {', '.join(missing_commands)}"
+
+    for command in commands:
+        statuses = evidence_by_command.get(command, [])
+        if not statuses:
+            return f"Required verification evidence is missing for: {command}"
+        failing = next((status for status in statuses if status in _VERIFICATION_FAILURE_STATUSES), None)
+        if failing:
+            return f"Verification command '{command}' reported status '{failing}'."
+        if not any(status in _VERIFICATION_SUCCESS_STATUSES for status in statuses):
+            return f"Verification command '{command}' did not report a passing status."
+
+    if result.get("tests_passed") is False:
+        return "Required verification command failed."
+    return None
+
+
+def _draft_pr_metadata_from_sources(*sources: dict[str, Any] | None) -> dict[str, Any]:
+    draft_pr: dict[str, Any] = {}
+    for source in sources:
+        source = source or {}
+        nested = source.get("draft_pr")
+        if isinstance(nested, dict):
+            draft_pr.update({key: value for key, value in nested.items() if value is not None})
+        for key in (
+            "draft_pr_url",
+            "draft_pr_number",
+            "draft_pr_title",
+            "draft_pr_state",
+            "draft_pr_branch_name",
+            "draft_pr_head_branch",
+            "draft_pr_base_branch",
+            "pull_request_url",
+            "pr_url",
+        ):
+            if source.get(key) is not None:
+                draft_pr[key] = source.get(key)
+    return draft_pr
+
+
+def _job_draft_pr_metadata(item: WorkItem) -> dict[str, Any]:
+    return _draft_pr_metadata_from_sources(item.payload, item.result)
+
+
+def _job_draft_pr_title(item: WorkItem, result: dict[str, Any]) -> str:
+    payload = item.payload or {}
+    candidates = [
+        result.get("commit_message"),
+        payload.get("commit_message"),
+        payload.get("task"),
+        payload.get("title"),
+        payload.get("goal"),
+        payload.get("summary"),
+        payload.get("description"),
+    ]
+    for candidate in candidates:
+        title = str(candidate or "").strip()
+        if title:
+            return title
+    return f"Idea Refinery job {item.id}"
+
+
+def _job_draft_pr_verification_summary(result: dict[str, Any]) -> str:
+    parts: list[str] = []
+    tests_passed = result.get("tests_passed")
+    if tests_passed is not None:
+        parts.append(f"tests_passed={bool(tests_passed)}")
+    entries = _verification_result_entries(result)
+    if entries:
+        rendered: list[str] = []
+        for entry in entries[:5]:
+            command = str(entry.get("command") or entry.get("name") or entry.get("check") or "verification").strip()
+            status = _normalize_verification_status(entry.get("status") or entry.get("state") or entry.get("result"))
+            rendered.append(f"{command}: {status or 'unknown'}")
+        if len(entries) > 5:
+            rendered.append(f"...and {len(entries) - 5} more")
+        parts.append("verification_results=" + "; ".join(rendered))
+    elif result.get("summary"):
+        parts.append(f"summary={str(result.get('summary')).strip()}")
+    return "; ".join(parts) if parts else "No verification summary was provided."
+
+
+def _job_draft_pr_graphify_status(payload: dict[str, Any], result: dict[str, Any]) -> str:
+    graphify_required = any("graphify update" in command for command in _verification_commands_for_payload(payload))
+    if result.get("graphify_updated"):
+        return "graphify_updated=True"
+    if graphify_required:
+        return "graphify_updated=False (required)"
+    return "graphify_updated=False"
+
+
+def _job_draft_pr_body(item: WorkItem, project: ProjectTwin, result: dict[str, Any], logs: str = "") -> str:
+    branch_name = result.get("branch_name") or item.branch_name or (item.payload or {}).get("branch_name") or (item.payload or {}).get("branch")
+    commit_sha = result.get("commit_sha") or "unknown"
+    payload = item.payload or {}
+    lines = [
+        f"Job ID: {item.id}",
+        f"Branch: {branch_name or 'unknown'}",
+        f"Base branch: {project.default_branch}",
+        f"Commit: {commit_sha}",
+        f"Verification summary: {_job_draft_pr_verification_summary(result)}",
+        f"Graphify status: {_job_draft_pr_graphify_status(payload, result)}",
+        "Logs note: completion logs are stored on the job record.",
+        "",
+        "Human approval required before merge.",
+    ]
+    if logs:
+        lines.insert(6, f"Completion logs: {logs[-400:].strip()}")
+    return "\n".join(lines)
+
+
+def _should_create_draft_pull_request(item: WorkItem, payload: dict[str, Any], result: dict[str, Any], draft_pr: dict[str, Any]) -> bool:
+    if item.job_type == "repo_index":
+        return False
+    if (payload.get("autonomy_level") or "") not in HIGH_AUTONOMY_LEVELS:
+        return False
+    if draft_pr:
+        return False
+    if not result.get("branch_name") or not result.get("commit_sha"):
+        return False
+    return True
+
+
+async def _create_draft_pull_request(
+    *,
+    item: WorkItem,
+    project: ProjectTwin,
+    result: dict[str, Any],
+    logs: str = "",
+) -> dict[str, Any]:
+    branch_name = result.get("branch_name") or item.branch_name or (item.payload or {}).get("branch_name") or (item.payload or {}).get("branch")
+    if not branch_name:
+        raise RuntimeError("missing branch name for draft pull request")
+    title = _job_draft_pr_title(item, result)
+    body = _job_draft_pr_body(item, project, result, logs)
+    github = GitHubAppService()
+    pr = await github.create_draft_pull_request(
+        installation_id=project.installation_id,
+        owner=project.owner,
+        repo_name=project.repo,
+        title=title,
+        head_branch=branch_name,
+        base_branch=project.default_branch,
+        body=body,
+    )
+    html_url = pr.get("html_url") or pr.get("url") or ""
+    draft_pr = {
+        "url": html_url,
+        "html_url": html_url,
+        "pull_request_url": html_url,
+        "number": pr.get("number"),
+        "state": pr.get("state") or "",
+        "draft": bool(pr.get("draft", True)),
+        "title": title,
+        "body": body,
+        "branch_name": branch_name,
+        "head_branch": branch_name,
+        "base_branch": project.default_branch,
+        "commit_sha": result.get("commit_sha"),
+        "job_id": item.id,
+    }
+    return draft_pr
 
 
 def job_to_jsonable(item: WorkItem, *, include_claim_token: bool = False) -> dict[str, Any]:
@@ -124,12 +376,17 @@ def job_to_jsonable(item: WorkItem, *, include_claim_token: bool = False) -> dic
     )
     command = (result.get("command") if isinstance(result, dict) else None) or payload.get("command") or _worker_command_example(item)
     branch_name = item.branch_name or (result.get("branch_name") if isinstance(result, dict) else None) or payload.get("branch") or payload.get("branch_name")
+    verification_commands = _verification_commands_for_payload(payload)
     prompt = _work_item_prompt(item)
     data["engine"] = engine
     data["model"] = model
     data["agent_name"] = agent_name
     data["command"] = command
     data["branch_name"] = branch_name
+    data["verification_commands"] = verification_commands
+    draft_pr = _job_draft_pr_metadata(item)
+    if draft_pr:
+        data["draft_pr"] = draft_pr
     data["opencode"] = {
         "engine": engine,
         "model": model,
@@ -711,7 +968,7 @@ class ProjectTwinService:
             ledger_path=ledger_path,
             ledger_policy=ledger_policy,
         )
-        payload_data = dict(payload or {})
+        payload_data = _normalize_job_payload(payload)
         payload_data.setdefault("engine", "opencode")
         effective_factory_run_id = factory_run_id or payload_data.get("factory_run_id")
         payload_data["factory_run_id"] = effective_factory_run_id
@@ -759,6 +1016,10 @@ class ProjectTwinService:
                 continue
             if capabilities and item.job_type not in capabilities:
                 continue
+            normalized_payload = _normalize_job_payload(item.payload)
+            if normalized_payload != (item.payload or {}):
+                item.payload = normalized_payload
+                await repo.save_work_item(item)
             project = await repo.get_project_twin_by_id(item.project_id)
             if not project:
                 item.status = "failed_terminal"
@@ -831,23 +1092,95 @@ class ProjectTwinService:
                 await self._refresh_factory_tracking(item)
                 return job_to_jsonable(item)
             item.logs = self._append_log(item.logs, f"[WARNING] {warning}")
-        if factory_run_id and item.job_type != "repo_index":
-            graphify_updated = result.get("graphify_updated", False)
-            verification_commands = payload.get("verification_commands") or []
-            has_graphify_cmd = any("graphify update" in cmd for cmd in verification_commands)
-            if has_graphify_cmd and not graphify_updated:
+        verification_commands = _verification_commands_for_payload(payload)
+        graphify_required = any("graphify update" in command for command in verification_commands)
+        graphify_updated = bool(result.get("graphify_updated"))
+        verification_failure = _verification_failure_reason(payload=payload, result=result, job_type=item.job_type)
+        high_autonomy = (payload.get("autonomy_level") or "") in HIGH_AUTONOMY_LEVELS
+        graphify_issue = graphify_required and not graphify_updated
+        if item.job_type != "repo_index" and graphify_issue:
+            if high_autonomy:
+                graphify_error = (
+                    "graphify update . was required but graphify_updated is false."
+                )
+                verification_failure = f"{verification_failure} {graphify_error}".strip() if verification_failure else graphify_error
+            else:
                 logs_combined = f"{logs}\n" if logs else ""
                 logs_combined += (
                     "[WARNING] graphify update . must be run before completion to keep the "
                     "knowledge graph current. Set graphify_updated=true in the result."
                 )
                 item.logs = self._append_log(item.logs, logs_combined)
+        if item.job_type != "repo_index" and high_autonomy and verification_failure:
+            item.status = "failed_terminal"
+            item.error = verification_failure
+            item.result = result
+            item.heartbeat_at = utcnow()
+            if logs:
+                item.logs = self._append_log(item.logs, f"[ERROR] {verification_failure}\n{logs}")
+            else:
+                item.logs = self._append_log(item.logs, f"[ERROR] {verification_failure}")
+            if result.get("branch_name") and not item.branch_name:
+                item.branch_name = result["branch_name"]
+            result.setdefault("branch_name", item.branch_name or payload.get("branch") or payload.get("branch_name"))
+            draft_pr = _draft_pr_metadata_from_sources(payload, result)
+            if draft_pr and "draft_pr" not in result:
+                result["draft_pr"] = draft_pr
+            result["token_economy"] = normalize_token_economy(
+                result.get("token_economy"),
+                work_item=item,
+                payload=payload,
+                result=result,
+            )
+            await repo.save_work_item(item)
+            await self._finalize_agent_run(item, status="failed", output=item.logs, result={"error": verification_failure})
+            await self._refresh_factory_tracking(item)
+            return job_to_jsonable(item)
         result["token_economy"] = normalize_token_economy(
             result.get("token_economy"),
             work_item=item,
             payload=payload,
             result=result,
         )
+        project = await repo.get_project_twin_by_id(item.project_id)
+        draft_pr = _draft_pr_metadata_from_sources(payload, result)
+        if (
+            project
+            and project.installation_id
+            and project.owner
+            and project.repo
+            and project.default_branch
+            and _should_create_draft_pull_request(item, payload, result, draft_pr)
+        ):
+            try:
+                draft_pr = await _create_draft_pull_request(item=item, project=project, result=result, logs=logs)
+                result["draft_pr"] = draft_pr
+            except Exception as exc:
+                message = str(exc).strip() or "unknown error"
+                error = message if message.startswith("Draft pull request creation failed") else f"Draft pull request creation failed: {message}"
+                item.status = "failed_terminal"
+                item.error = error
+                item.result = result
+                item.heartbeat_at = utcnow()
+                if logs:
+                    item.logs = self._append_log(item.logs, f"[ERROR] {error}\n{logs}")
+                else:
+                    item.logs = self._append_log(item.logs, f"[ERROR] {error}")
+                if result.get("branch_name") and not item.branch_name:
+                    item.branch_name = result["branch_name"]
+                result.setdefault("branch_name", item.branch_name or payload.get("branch") or payload.get("branch_name"))
+                if draft_pr and "draft_pr" not in result:
+                    result["draft_pr"] = draft_pr
+                result["token_economy"] = normalize_token_economy(
+                    result.get("token_economy"),
+                    work_item=item,
+                    payload=payload,
+                    result=result,
+                )
+                await repo.save_work_item(item)
+                await self._finalize_agent_run(item, status="failed", output=item.logs, result={"error": error})
+                await self._refresh_factory_tracking(item)
+                return job_to_jsonable(item)
         item.status = "completed"
         item.result = result
         item.heartbeat_at = utcnow()
@@ -859,12 +1192,17 @@ class ProjectTwinService:
             result.setdefault("agent_name", result.get("agent_name") or payload.get("agent") or payload.get("agent_name"))
         if result.get("branch_name"):
             item.branch_name = result["branch_name"]
+        if item.branch_name and not result.get("branch_name"):
+            result["branch_name"] = item.branch_name
+        draft_pr = _draft_pr_metadata_from_sources(payload, result)
+        if draft_pr and "draft_pr" not in result:
+            result["draft_pr"] = draft_pr
         if logs:
             item.logs = self._append_log(item.logs, logs)
         await repo.save_work_item(item)
         await self._finalize_agent_run(item, status="completed", output=logs or result.get("agent_output") or "", result=result)
 
-        if result.get("commit_sha") and result.get("branch_name"):
+        if item.status == "completed" and result.get("commit_sha") and result.get("branch_name"):
             await repo.add_project_commit(
                 ProjectCommit(
                     idea_id=item.idea_id,
@@ -877,10 +1215,10 @@ class ProjectTwinService:
                 )
             )
 
-        project = await repo.get_project_twin_by_id(item.project_id)
         if project:
-            project.health_status = "healthy" if result.get("tests_passed", item.job_type == "repo_index") else project.health_status
-            if item.job_type == "repo_index":
+            if item.status == "completed":
+                project.health_status = "healthy" if result.get("tests_passed", item.job_type == "repo_index") else project.health_status
+            if item.job_type == "repo_index" and item.status == "completed":
                 await self._store_code_index(project, item, result)
             latest_index = await repo.get_latest_code_index(project.idea_id)
             commits = await repo.list_project_commits(project.idea_id)

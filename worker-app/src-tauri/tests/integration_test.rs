@@ -1,10 +1,13 @@
+use idearefinery_worker_lib::config::{config_path_in, load_config_from_dir, save_config_to_dir};
 use idearefinery_worker_lib::git::ensure_repo;
+use idearefinery_worker_lib::state::{state_path_in, StateStore};
 use idearefinery_worker_lib::types::{Job, Project, WorkerConfig, WorkerCredentials, WorkerState};
 use idearefinery_worker_lib::worker::{
     resolve_verification_commands,
     resolve_work_branch_name,
 };
 use std::collections::HashMap;
+use std::path::Path;
 use std::path::PathBuf;
 use serde_json::json;
 
@@ -71,6 +74,21 @@ fn test_default_config() {
 }
 
 #[test]
+fn test_worker_paths_use_idearefinery_worker_directory() {
+    let base = std::env::temp_dir().join(format!(
+        "idearefinery-worker-paths-{}",
+        std::process::id()
+    ));
+    let config_path = config_path_in(&base);
+    let state_path = state_path_in(&base);
+
+    assert!(config_path.ends_with(Path::new("idearefinery-worker").join("worker-config.json")));
+    assert!(state_path.ends_with(Path::new("idearefinery-worker").join("state.json")));
+    assert!(!config_path.to_string_lossy().contains("openclaude-local"));
+    assert!(!state_path.to_string_lossy().contains("openclaude-local"));
+}
+
+#[test]
 fn test_api_client_construction() {
     use idearefinery_worker_lib::api::ApiClient;
     let _client = ApiClient::new("http://localhost:8000".to_string(), "test-token".to_string());
@@ -89,6 +107,37 @@ fn test_slug() {
     }
     assert_eq!(slug_value("Hello/World"), "hello-world");
     assert_eq!(slug_value("MyRepo"), "myrepo");
+}
+
+#[test]
+fn test_state_store_migrates_legacy_openclaude_path() {
+    let base = std::env::temp_dir().join(format!(
+        "idearefinery-worker-state-migration-{}",
+        std::process::id()
+    ));
+    let legacy_path = base
+        .join("idearefinery-worker")
+        .join("openclaude-local")
+        .join("state.json");
+    let new_path = state_path_in(&base);
+    std::fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &legacy_path,
+        r#"{"api_base":"http://localhost:8000","worker_id":"worker-legacy","api_token":"token-legacy","credentials":{},"worker_auth_token":null}"#,
+    )
+    .unwrap();
+
+    let store = StateStore::from_data_dir(&base);
+    let state = store.load().expect("legacy state should load");
+
+    assert_eq!(state.worker_id, "worker-legacy");
+    assert!(new_path.exists());
+    assert!(legacy_path.exists());
+
+    let saved: WorkerState = serde_json::from_str(&std::fs::read_to_string(&new_path).unwrap()).unwrap();
+    assert_eq!(saved.worker_id, "worker-legacy");
+
+    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
@@ -129,6 +178,68 @@ fn test_pairing_payload_shape() {
     assert!(json.contains("tenant_id"));
 }
 
+#[test]
+fn test_load_config_migrates_legacy_openclaude_path() {
+    let base = std::env::temp_dir().join(format!(
+        "idearefinery-worker-config-migration-{}",
+        std::process::id()
+    ));
+    let legacy_path = base.join("openclaude-local").join("worker-config.json");
+    let new_path = config_path_in(&base);
+    std::fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &legacy_path,
+        r#"{"api_base":"http://localhost:8000","display_name":"Legacy Worker","engine":"openclaude"}"#,
+    )
+    .unwrap();
+
+    let config = load_config_from_dir(&base);
+
+    assert_eq!(config.api_base, "http://localhost:8000");
+    assert_eq!(config.display_name, "Legacy Worker");
+    assert!(new_path.exists());
+    assert!(legacy_path.exists());
+
+    let migrated: WorkerConfig = serde_json::from_str(&std::fs::read_to_string(&new_path).unwrap()).unwrap();
+    assert_eq!(migrated.api_base, "http://localhost:8000");
+
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn test_save_config_writes_new_path_only() {
+    let base = std::env::temp_dir().join(format!(
+        "idearefinery-worker-config-save-{}",
+        std::process::id()
+    ));
+    let legacy_path = base.join("openclaude-local").join("worker-config.json");
+    let new_path = config_path_in(&base);
+    let config = WorkerConfig {
+        api_base: "http://localhost:8000".to_string(),
+        display_name: "Save Worker".to_string(),
+        engine: "openclaude".to_string(),
+        allow_full_control: false,
+        workspace_root: "~/.test-worker/repos".to_string(),
+        poll_seconds: 30,
+        capabilities: vec!["repo_index".to_string()],
+        tenant_id: Some("test-tenant".to_string()),
+        openclaude: HashMap::new(),
+        opencode_server_url: None,
+        litellm_port: None,
+        litellm_config: None,
+    };
+
+    save_config_to_dir(&base, &config).unwrap();
+
+    assert!(new_path.exists());
+    assert!(!legacy_path.exists());
+
+    let saved: WorkerConfig = serde_json::from_str(&std::fs::read_to_string(&new_path).unwrap()).unwrap();
+    assert_eq!(saved.display_name, "Save Worker");
+
+    let _ = std::fs::remove_dir_all(&base);
+}
+
 fn test_project() -> Project {
     Project {
         id: "project-1".to_string(),
@@ -143,6 +254,23 @@ fn test_resolve_work_branch_prefers_backend_then_payload_then_fallback() {
     let project = test_project();
     let job = Job {
         id: "job-abcdef123456".to_string(),
+        job_type: "agent_branch_work".to_string(),
+        branch_name: Some("feature/job-branch".to_string()),
+        claim_token: String::new(),
+        payload: Some(json!({"branch_name": "feature/payload-branch"})),
+    };
+    let payload_obj = job.payload.as_ref().unwrap().as_object().unwrap().clone();
+
+    let resolved = resolve_work_branch_name(&job, &project, &payload_obj);
+
+    assert_eq!(resolved, "feature/job-branch");
+}
+
+#[test]
+fn test_resolve_work_branch_skips_protected_job_branch_for_payload_branch() {
+    let project = test_project();
+    let job = Job {
+        id: "job-12345678".to_string(),
         job_type: "agent_branch_work".to_string(),
         branch_name: Some("main".to_string()),
         claim_token: String::new(),
@@ -175,7 +303,24 @@ fn test_resolve_work_branch_uses_deterministic_fallback_for_protected_names() {
 }
 
 #[test]
-fn test_resolve_verification_commands_prefers_bundle_then_legacy() {
+fn test_resolve_verification_commands_prefers_payload_then_bundle_then_legacy() {
+    let payload = json!({
+        "verification_commands": ["cargo test --locked"],
+        "worker_context_bundle": {
+            "verification_commands": ["python -m pytest -q", "graphify update ."]
+        },
+        "test_commands": ["legacy test"]
+    });
+    let payload_obj = payload.as_object().unwrap().clone();
+    let legacy = vec!["legacy test".to_string()];
+
+    let commands = resolve_verification_commands(&payload_obj, &legacy);
+
+    assert_eq!(commands, vec!["cargo test --locked"]);
+}
+
+#[test]
+fn test_resolve_verification_commands_uses_bundle_before_legacy() {
     let payload = json!({
         "worker_context_bundle": {
             "verification_commands": ["python -m pytest -q", "graphify update ."]

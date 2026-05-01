@@ -30,6 +30,100 @@
   let activeJobs = $derived((state.jobs || []).filter((j) => ['queued', 'waiting_for_machine', 'failed_retryable', 'claimed', 'running'].includes(j.status)));
   let failedJobs = $derived((state.jobs || []).filter((j) => j.status?.includes('failed')));
 
+  function firstValue(...values) {
+    return values.find((value) => typeof value === 'string' && value.trim()) || '';
+  }
+
+  function inspectionBranch(job) {
+    return firstValue(
+      job.branch_name,
+      job.result?.branch_name,
+      job.opencode?.branch_name,
+      job.payload?.branch,
+      job.payload?.branch_name
+    );
+  }
+
+  function inspectionDraftPrUrl(job) {
+    return firstValue(
+      job.draft_pr_url,
+      job.draft_pr?.html_url,
+      job.draft_pr?.url,
+      job.result?.draft_pr_url,
+      job.result?.draft_pr?.html_url,
+      job.result?.draft_pr?.url,
+      job.result?.pull_request_url,
+      job.result?.pr_url,
+      job.opencode?.draft_pr_url,
+      job.payload?.draft_pr_url
+    );
+  }
+
+  function inspectionVerificationResults(job) {
+    const results = job.verification_results || job.result?.verification_results || [];
+    return Array.isArray(results) ? results : [];
+  }
+
+  function inspectionGraphifyStatus(job) {
+    return firstValue(
+      job.graphify_status,
+      job.result?.graphify_status,
+      job.safety_net_results?.graphify_status
+    ) || (
+      inspectionGraphifyUpdated(job) === true
+        ? 'updated'
+        : inspectionGraphifyUpdated(job) === false
+          ? 'required'
+          : ''
+    );
+  }
+
+  function inspectionGraphifyUpdated(job) {
+    const value = job.graphify_updated ?? job.result?.graphify_updated ?? job.safety_net_results?.graphify_updated;
+    return typeof value === 'boolean' ? value : null;
+  }
+
+  function verificationTone(status = '') {
+    const normalized = String(status).toLowerCase();
+    if (['passed', 'success', 'completed', 'ok', 'true'].includes(normalized)) return 'success';
+    if (['failed', 'error', 'blocked', 'false'].includes(normalized)) return 'error';
+    if (['warning', 'partial', 'needs_review'].includes(normalized)) return 'warning';
+    return 'muted';
+  }
+
+  function inspectionGraphifyTone(job) {
+    if (inspectionGraphifyUpdated(job) === true) return 'success';
+    if (inspectionGraphifyUpdated(job) === false) return 'warning';
+    if (inspectionGraphifyStatus(job)) return 'accent';
+    return 'muted';
+  }
+
+  function humanReviewReason(job) {
+    return firstValue(
+      job.review_reason,
+      job.result?.review_reason,
+      job.result?.blocked_reason,
+      job.result?.failure_reason,
+      job.error
+    );
+  }
+
+  function needsHumanReview(job) {
+    if (job.needs_human_review === true || job.result?.needs_human_review === true) return true;
+    if (job.review_state === 'needs_human_review' || job.result?.review_state === 'needs_human_review') return true;
+    if (job.status === 'blocked') return true;
+    if (inspectionGraphifyUpdated(job) === false) return true;
+    return inspectionVerificationResults(job).some((result) => {
+      const status = String(result.status || result.state || result.outcome || '').toLowerCase();
+      return ['failed', 'error', 'blocked'].includes(status);
+    });
+  }
+
+  function humanReviewLabel(job) {
+    if (needsHumanReview(job)) return 'Needs human review';
+    return 'Autonomy: ready';
+  }
+
   async function loadWorkers() {
     isLoading = true; error = '';
     try {
@@ -131,6 +225,16 @@
 
   function resultSummary(job) {
     return job.result?.agent_output || job.result?.summary || JSON.stringify(job.result, null, 2);
+  }
+
+  function verificationSummary(job) {
+    const results = inspectionVerificationResults(job);
+    if (!results.length) return '';
+    const passed = results.filter((result) => {
+      const status = String(result.status || result.state || result.outcome || '').toLowerCase();
+      return ['passed', 'success', 'completed', 'ok'].includes(status);
+    }).length;
+    return `${passed}/${results.length} verification${results.length === 1 ? '' : 's'} passed`;
   }
 
   onMount(loadWorkers);
@@ -273,6 +377,30 @@
                 {#if job.error}<span class="job-error">{job.error}</span>{/if}
                 {#if opencodeSummary(job)}<span class="job-meta">OpenCode: {opencodeSummary(job)}</span>{/if}
                 {#if branchLabel(job)}<span class="job-meta">Branch: {branchLabel(job)}</span>{/if}
+                <div class="inspection-row">
+                  <Badge variant={needsHumanReview(job) ? 'warning' : 'success'}>
+                    {humanReviewLabel(job)}
+                  </Badge>
+                  {#if inspectionBranch(job)}
+                    <Badge variant="muted">Branch: {inspectionBranch(job)}</Badge>
+                  {/if}
+                  {#if inspectionDraftPrUrl(job)}
+                    <a class="inspection-link" href={inspectionDraftPrUrl(job)} target="_blank" rel="noreferrer">Draft PR</a>
+                  {/if}
+                  {#if inspectionVerificationResults(job).length}
+                    <Badge variant={verificationTone(inspectionVerificationResults(job)[0]?.status)}>
+                      {verificationSummary(job)}
+                    </Badge>
+                  {/if}
+                  {#if inspectionGraphifyStatus(job)}
+                    <Badge variant={inspectionGraphifyTone(job)}>
+                      Graphify: {inspectionGraphifyStatus(job)}{#if inspectionGraphifyUpdated(job) !== null} ({inspectionGraphifyUpdated(job) ? 'updated' : 'pending'}){/if}
+                    </Badge>
+                  {/if}
+                </div>
+                {#if needsHumanReview(job) && humanReviewReason(job)}
+                  <span class="review-reason">Reason: {humanReviewReason(job)}</span>
+                {/if}
                 {#if job.command || job.opencode?.command}
                   <details>
                     <summary>OpenCode command</summary>
@@ -283,6 +411,21 @@
                   <details>
                     <summary>OpenCode prompt</summary>
                     <pre>{promptPreview(job)}</pre>
+                  </details>
+                {/if}
+                {#if inspectionVerificationResults(job).length}
+                  <details>
+                    <summary>Verification results</summary>
+                    <div class="verification-list">
+                      {#each inspectionVerificationResults(job) as result, index}
+                        <div class="verification-row">
+                          <Badge variant={verificationTone(result.status || result.state || result.outcome)}>
+                            {result.command || result.name || `Check ${index + 1}`}
+                          </Badge>
+                          <span>{result.summary || result.message || result.output || result.status || 'n/a'}</span>
+                        </div>
+                      {/each}
+                    </div>
                   </details>
                 {/if}
                 {#if job.logs_tail}
@@ -315,7 +458,19 @@
           {/each}
         </div>
       {:else}
-        <div class="empty">No worker jobs have been queued yet.</div>
+        <div class="empty empty-state">
+          <span class="empty-icon"><TerminalSquare size={22} /></span>
+          <div>
+            <strong>No worker jobs are waiting</strong>
+            <span>
+              {#if approvedWorkers.length}
+                {approvedWorkers.length} approved worker{approvedWorkers.length === 1 ? '' : 's'} ready when a build job is queued.
+              {:else}
+                Connect and approve a worker before starting a Level 1 canary.
+              {/if}
+            </span>
+          </div>
+        </div>
       {/if}
     </section>
   </div>
@@ -346,9 +501,20 @@
   .hint { color: var(--color-text-secondary); font-size: 0.78rem; margin: 0; }
   .row-list { display: grid; gap: 10px; }
   .request-row, .worker-row, .job-row, .empty { background: rgba(3, 8, 12, 0.48); border: 1px solid rgba(103, 128, 151, 0.18); border-radius: var(--border-radius-md); padding: var(--spacing-md); }
+  .empty-state { align-items: flex-start; display: flex; gap: 10px; }
+  .empty-icon { color: var(--color-primary-2); flex: 0 0 auto; margin-top: 2px; }
+  .empty-state strong { color: var(--color-text); display: block; font-size: 0.9rem; margin-bottom: 3px; }
+  .empty-state span { color: var(--color-text-secondary); display: block; font-size: 0.78rem; line-height: 1.4; }
   .request-row strong, .request-row small, .request-row span, .worker-row strong, .worker-row small, .worker-row span, .job-row strong, .job-row small, .job-row span { display: block; }
   .job-error { color: var(--color-error) !important; }
   .job-meta { color: var(--color-primary-2) !important; }
+  .inspection-row { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .inspection-link { color: var(--color-accent); font-size: 0.8rem; text-decoration: none; }
+  .inspection-link:hover { text-decoration: underline; }
+  .review-reason { color: var(--color-text-secondary); display: block; font-size: 0.76rem; margin-top: 6px; }
+  .verification-list { display: grid; gap: 6px; margin-top: 8px; }
+  .verification-row { align-items: flex-start; display: flex; gap: 8px; }
+  .verification-row span { color: var(--color-text-secondary); font-size: 0.74rem; line-height: 1.35; }
   .failed-callout {
     background: rgba(255, 61, 79, 0.08);
     border: 1px solid rgba(255, 61, 79, 0.24);

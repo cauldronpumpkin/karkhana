@@ -255,7 +255,16 @@
   </section>
 
   {#if error}
-    <div class="notice error" role="alert">{error}</div>
+    <div class="notice error error-state" role="alert">
+      <XCircle size={18} />
+      <div>
+        <strong>Worker dashboard could not load</strong>
+        <span>{error}</span>
+      </div>
+      <Button size="sm" variant="secondary" onclick={loadWorkers} disabled={isLoading}>
+        <RefreshCw size={14} /> Retry
+      </Button>
+    </div>
   {/if}
 
   <!-- Invite Link Section -->
@@ -529,6 +538,10 @@
   pre { background: rgba(0, 0, 0, 0.26); border-radius: var(--border-radius-sm); color: var(--color-text-secondary); font-size: 0.72rem; margin: 6px 0 0; max-height: 180px; overflow: auto; padding: 8px; white-space: pre-wrap; }
   .empty { color: var(--color-text-secondary); min-height: 64px; }
   .notice.error { border-color: rgba(255, 61, 79, 0.42); color: var(--color-error); margin-bottom: var(--spacing-lg); }
+  .error-state { align-items: flex-start; display: flex; gap: 10px; }
+  .error-state > div { flex: 1; }
+  .error-state strong { color: var(--color-error); display: block; font-size: 0.9rem; margin-bottom: 3px; }
+  .error-state span { color: var(--color-text-secondary); display: block; font-size: 0.78rem; line-height: 1.4; }
   .spin { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (max-width: 900px) { .hero, .worker-row, .request-row { flex-direction: column; } .status-grid, .workspace { grid-template-columns: 1fr; } }

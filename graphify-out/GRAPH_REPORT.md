@@ -1,7 +1,7 @@
 # Graph Report - .  (2026-05-02)
 
 ## Corpus Check
-- 252 files · ~204,312 words
+- 252 files · ~204,432 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -856,9 +856,9 @@ _Questions this graph is uniquely positioned to answer:_
 - **Why does `InMemoryRepository` connect `Community 3` to `Community 1`, `Community 2`, `Community 4`, `Community 5`, `Community 6`, `Community 8`, `Community 9`, `Community 13`?**
   _High betweenness centrality (0.105) - this node is a cross-community bridge._
 - **Why does `Repository` connect `Community 9` to `Community 3`, `Community 4`?**
-  _High betweenness centrality (0.067) - this node is a cross-community bridge._
+  _High betweenness centrality (0.068) - this node is a cross-community bridge._
 - **Why does `FileManager` connect `Community 1` to `Community 4`, `Community 5`, `Community 14`?**
-  _High betweenness centrality (0.059) - this node is a cross-community bridge._
+  _High betweenness centrality (0.061) - this node is a cross-community bridge._
 - **Are the 148 inferred relationships involving `FileManager` (e.g. with `BuildHandoffService` and `Generate a memory key for build tracking.`) actually correct?**
   _`FileManager` has 148 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 57 inferred relationships involving `InMemoryRepository` (e.g. with `MockLLMService` and `FakeSession`) actually correct?**

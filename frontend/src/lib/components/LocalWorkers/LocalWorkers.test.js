@@ -158,6 +158,21 @@ describe('LocalWorkers', () => {
     });
   });
 
+  it('renders an actionable error state when the worker dashboard fails to load', async () => {
+    fetch.mockImplementation((url) => {
+      if (url === '/api/local-workers') {
+        return Promise.resolve({ ok: false, status: 503 });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    render(LocalWorkers);
+
+    expect(await screen.findByText('Worker dashboard could not load')).toBeInTheDocument();
+    expect(screen.getByText('HTTP 503')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+  });
+
   it('approves a worker request', async () => {
     render(LocalWorkers);
 

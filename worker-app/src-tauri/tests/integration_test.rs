@@ -1,5 +1,12 @@
-use idearefinery_worker_lib::types::{WorkerConfig, WorkerState, WorkerCredentials};
+use idearefinery_worker_lib::git::ensure_repo;
+use idearefinery_worker_lib::types::{Job, Project, WorkerConfig, WorkerCredentials, WorkerState};
+use idearefinery_worker_lib::worker::{
+    resolve_verification_commands,
+    resolve_work_branch_name,
+};
 use std::collections::HashMap;
+use std::path::PathBuf;
+use serde_json::json;
 
 #[test]
 fn test_config_roundtrip() {
@@ -19,7 +26,6 @@ fn test_config_roundtrip() {
     };
 
     let temp_dir = std::env::temp_dir().join("idearefinery-worker-test");
-    let config_path = temp_dir.join("worker-config.json");
     std::fs::create_dir_all(&temp_dir).unwrap();
 
     // Temporarily override config path by setting env (if supported) or use direct save
@@ -121,4 +127,97 @@ fn test_pairing_payload_shape() {
     let json = serde_json::to_string(&req).unwrap();
     assert!(json.contains("display_name"));
     assert!(json.contains("tenant_id"));
+}
+
+fn test_project() -> Project {
+    Project {
+        id: "project-1".to_string(),
+        repo_full_name: "acme/demo".to_string(),
+        clone_url: "https://example.com/acme/demo.git".to_string(),
+        default_branch: Some("main".to_string()),
+    }
+}
+
+#[test]
+fn test_resolve_work_branch_prefers_backend_then_payload_then_fallback() {
+    let project = test_project();
+    let job = Job {
+        id: "job-abcdef123456".to_string(),
+        job_type: "agent_branch_work".to_string(),
+        branch_name: Some("main".to_string()),
+        claim_token: String::new(),
+        payload: Some(json!({"branch_name": "feature/payload-branch"})),
+    };
+    let payload_obj = job.payload.as_ref().unwrap().as_object().unwrap().clone();
+
+    let resolved = resolve_work_branch_name(&job, &project, &payload_obj);
+
+    assert_eq!(resolved, "feature/payload-branch");
+}
+
+#[test]
+fn test_resolve_work_branch_uses_deterministic_fallback_for_protected_names() {
+    let project = test_project();
+    let job = Job {
+        id: "job-12345678".to_string(),
+        job_type: "agent_branch_work".to_string(),
+        branch_name: Some("main".to_string()),
+        claim_token: String::new(),
+        payload: Some(json!({"branch_name": "master"})),
+    };
+    let payload_obj = job.payload.as_ref().unwrap().as_object().unwrap().clone();
+
+    let resolved = resolve_work_branch_name(&job, &project, &payload_obj);
+
+    assert!(resolved.starts_with("idearefinery/acme-demo/job-1234"));
+    assert_ne!(resolved, "main");
+    assert_ne!(resolved, "master");
+}
+
+#[test]
+fn test_resolve_verification_commands_prefers_bundle_then_legacy() {
+    let payload = json!({
+        "worker_context_bundle": {
+            "verification_commands": ["python -m pytest -q", "graphify update ."]
+        },
+        "test_commands": ["legacy test"]
+    });
+    let payload_obj = payload.as_object().unwrap().clone();
+    let legacy = vec!["legacy test".to_string()];
+
+    let commands = resolve_verification_commands(&payload_obj, &legacy);
+
+    assert_eq!(commands, vec!["python -m pytest -q", "graphify update ."]);
+}
+
+#[test]
+fn test_ensure_repo_fails_on_dirty_repo_before_checkout() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "idearefinery-worker-preflight-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    std::process::Command::new("git")
+        .arg("init")
+        .arg(&temp_dir)
+        .status()
+        .unwrap();
+    std::fs::write(temp_dir.join("dirty.txt"), "dirty").unwrap();
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut logs = Vec::new();
+    let err = rt
+        .block_on(ensure_repo(
+            PathBuf::from(&temp_dir),
+            "https://example.invalid/demo.git",
+            "main",
+            &mut logs,
+        ))
+        .expect_err("dirty repositories should fail preflight");
+
+    assert_eq!(err.code, "repo_dirty_preflight");
+    assert_eq!(err.stage, "branch_checkout");
+    assert!(err.repo_status.unwrap_or_default().contains("dirty.txt"));
+    let _ = std::fs::remove_dir_all(&temp_dir);
 }

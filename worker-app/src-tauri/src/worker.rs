@@ -11,13 +11,16 @@ use crate::sandbox::PermissionPolicy;
 use crate::sqs::SqsTransport;
 use crate::state::StateStore;
 use crate::types::{
-    HIGH_AUTONOMY_REQUIRED_CAPABILITIES, Job, JobCompleteRequest, JobFailRequest, JobUpdateRequest,
-    Project, WorkerConfig, WorkerState,
+    DraftPullRequestMetadata, HIGH_AUTONOMY_REQUIRED_CAPABILITIES, Job, JobCompleteRequest,
+    JobFailRequest, JobUpdateRequest, Project, VerificationResult, WorkerConfig, WorkerFailure,
+    WorkerState,
 };
 use serde_json::json;
+use serde_json::{Map, Value};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 use tokio::time::{sleep, Duration};
 
@@ -42,6 +45,155 @@ fn has_graphify_verification(payload: &serde_json::Value) -> bool {
         })
         .unwrap_or(false);
     cmds
+}
+
+pub fn is_protected_branch_name(branch_name: &str, default_branch: Option<&str>) -> bool {
+    let normalized = branch_name.trim();
+    if normalized.is_empty() {
+        return true;
+    }
+    let lowered = normalized.to_ascii_lowercase();
+    matches!(lowered.as_str(), "main" | "master")
+        || default_branch
+            .map(|default_branch| lowered == default_branch.trim().to_ascii_lowercase())
+            .unwrap_or(false)
+}
+
+pub fn resolve_work_branch_name(job: &Job, project: &Project, payload_obj: &Map<String, Value>) -> String {
+    let mut candidates = Vec::new();
+    if let Some(branch_name) = job.branch_name.as_deref() {
+        candidates.push(branch_name.trim().to_string());
+    }
+    if let Some(branch_name) = payload_obj.get("branch_name").and_then(Value::as_str) {
+        candidates.push(branch_name.trim().to_string());
+    }
+
+    for candidate in candidates {
+        if !candidate.is_empty() && !is_protected_branch_name(&candidate, project.default_branch.as_deref()) {
+            return candidate;
+        }
+    }
+
+    let mut fallback = format!(
+        "idearefinery/{}/{}",
+        slug(&project.repo_full_name),
+        &job.id[..job.id.len().min(8)]
+    );
+    if is_protected_branch_name(&fallback, project.default_branch.as_deref()) {
+        fallback.push_str("-work");
+    }
+    fallback
+}
+
+pub fn resolve_verification_commands(
+    payload_obj: &Map<String, Value>,
+    legacy_test_commands: &[String],
+) -> Vec<String> {
+    let mut commands = string_list(payload_obj.get("verification_commands"));
+    if commands.is_empty() {
+        if let Some(bundle) = payload_obj.get("worker_context_bundle").and_then(Value::as_object) {
+            commands = string_list(bundle.get("verification_commands"));
+        }
+    }
+    if commands.is_empty() {
+        commands = legacy_test_commands
+            .iter()
+            .map(|command| command.trim().to_string())
+            .filter(|command| !command.is_empty())
+            .collect();
+    }
+    commands
+}
+
+pub fn resolve_draft_pull_request_metadata(
+    payload_obj: &Map<String, Value>,
+) -> Option<DraftPullRequestMetadata> {
+    if let Some(metadata) = payload_obj
+        .get("draft_pull_request")
+        .and_then(Value::as_object)
+        .or_else(|| payload_obj.get("draft_pr").and_then(Value::as_object))
+    {
+        return Some(DraftPullRequestMetadata {
+            url: metadata.get("url").and_then(Value::as_str).map(|s| s.to_string()),
+            html_url: metadata
+                .get("html_url")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string()),
+            number: metadata.get("number").and_then(Value::as_u64),
+            draft: metadata.get("draft").and_then(Value::as_bool),
+        });
+    }
+
+    let url = string_value(payload_obj.get("draft_pr_url"))
+        .or_else(|| string_value(payload_obj.get("pull_request_url")))
+        .or_else(|| string_value(payload_obj.get("pr_url")));
+    let html_url = string_value(payload_obj.get("draft_pr_html_url"))
+        .or_else(|| string_value(payload_obj.get("pull_request_html_url")))
+        .or_else(|| string_value(payload_obj.get("pr_html_url")));
+    let number = payload_obj
+        .get("draft_pr_number")
+        .or_else(|| payload_obj.get("pull_request_number"))
+        .or_else(|| payload_obj.get("pr_number"))
+        .and_then(Value::as_u64);
+    let draft = payload_obj
+        .get("draft_pr_draft")
+        .or_else(|| payload_obj.get("pull_request_draft"))
+        .and_then(Value::as_bool);
+
+    if url.is_none() && html_url.is_none() && number.is_none() && draft.is_none() {
+        None
+    } else {
+        Some(DraftPullRequestMetadata {
+            url,
+            html_url,
+            number,
+            draft,
+        })
+    }
+}
+
+fn string_value(value: Option<&Value>) -> Option<String> {
+    value.and_then(Value::as_str).map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
+}
+
+fn string_list(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|command| command.trim().to_string())
+                .filter(|command| !command.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn tail_text(value: &str, max_chars: usize) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() <= max_chars {
+        return value.to_string();
+    }
+    chars[chars.len() - max_chars..].iter().collect()
+}
+
+fn structured_failure(
+    code: &str,
+    stage: &str,
+    message: impl Into<String>,
+    branch_name: Option<String>,
+    repo_status: Option<String>,
+    details: Option<Value>,
+) -> WorkerFailure {
+    WorkerFailure {
+        code: code.to_string(),
+        stage: stage.to_string(),
+        message: message.into(),
+        branch_name,
+        repo_status,
+        details,
+    }
 }
 
 static WORKER_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -293,7 +445,7 @@ async fn process_job(
         logs,
     )
     .await
-    .map_err(|e| WorkerError::Git(e))?;
+    .map_err(WorkerError::from)?;
 
     let payload_obj = job
         .payload
@@ -386,6 +538,7 @@ struct CircuitBreakerResult {
     output: String,
     session_id: Option<String>,
     diff: String,
+    error: Option<WorkerFailure>,
 }
 
 async fn run_with_circuit_breaker(
@@ -411,6 +564,7 @@ async fn run_with_circuit_breaker(
             output,
             session_id: None,
             diff: String::new(),
+            error: None,
         }
     }
 }
@@ -431,6 +585,14 @@ async fn run_server_with_breaker(
                 output: String::new(),
                 session_id: None,
                 diff: String::new(),
+                error: Some(structured_failure(
+                    "opencode_session_create_failed",
+                    "opencode_session",
+                    e.to_string(),
+                    None,
+                    None,
+                    None,
+                )),
             };
         }
     };
@@ -467,7 +629,7 @@ async fn run_server_with_breaker(
         let checkpoint_payload = serde_json::json!({
             "work_item_id": "",
             "status_detail": "session_started",
-            "session_id": session.id,
+            "session_id": session.id.clone(),
         });
         sqs.send_event(&ctx.state.worker_id, "status_update", &checkpoint_payload)
             .await
@@ -504,6 +666,18 @@ async fn run_server_with_breaker(
             if !output.trim().is_empty() {
                 logs.push(output.trim().to_string());
             }
+            let empty_output_error = if output.trim().is_empty() {
+                Some(structured_failure(
+                    "opencode_empty_output",
+                    "opencode_message",
+                    "OpenCode returned empty output for branch work",
+                    Some(session.id.clone()),
+                    None,
+                    None,
+                ))
+            } else {
+                None
+            };
 
             let diff = opencode_client
                 .get_diff(&session.id)
@@ -518,8 +692,9 @@ async fn run_server_with_breaker(
 
             CircuitBreakerResult {
                 output,
-                session_id: Some(session.id),
+                session_id: Some(session.id.clone()),
                 diff,
+                error: empty_output_error,
             }
         }
         Err(e) => {
@@ -527,8 +702,16 @@ async fn run_server_with_breaker(
             let _ = opencode_client.delete_session(&session.id).await;
             CircuitBreakerResult {
                 output: String::new(),
-                session_id: Some(session.id),
+                session_id: Some(session.id.clone()),
                 diff: String::new(),
+                error: Some(structured_failure(
+                    "opencode_message_failed",
+                    "opencode_message",
+                    e.to_string(),
+                    Some(session.id.clone()),
+                    None,
+                    None,
+                )),
             }
         }
     }
@@ -556,17 +739,7 @@ async fn branch_work_with_server(
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-    let branch = payload_obj
-        .get("branch_name")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            format!(
-                "idearefinery/{}/{}",
-                slug(&project.repo_full_name),
-                &job.id[..job.id.len().min(8)]
-            )
-        });
+    let branch = resolve_work_branch_name(job, project, &payload_obj);
 
     crate::git::git_checkout_new_branch(repo_dir, &branch, logs)
         .await
@@ -591,7 +764,25 @@ async fn branch_work_with_server(
 
     crate::sandbox::remove_agents_md(repo_dir).ok();
 
-    let test_commands: Vec<String> = payload_obj
+    if let Some(failure) = cb_result.error {
+        return Err(WorkerError::from(failure));
+    }
+
+    if cb_result.output.trim().is_empty() {
+        return Err(WorkerError::from(structured_failure(
+            "agent_output_empty",
+            "agent_execution",
+            "Branch work produced no OpenCode output",
+            Some(branch.clone()),
+            None,
+            Some(json!({
+                "session_id": cb_result.session_id,
+                "diff": cb_result.diff,
+            })),
+        )));
+    }
+
+    let legacy_test_commands: Vec<String> = payload_obj
         .get("test_commands")
         .and_then(|v| v.as_array())
         .map(|arr| {
@@ -601,42 +792,64 @@ async fn branch_work_with_server(
         })
         .unwrap_or_default();
 
-    let tests_passed = run_tests(repo_dir, &test_commands, logs).await;
+    let verification_commands = resolve_verification_commands(&payload_obj, &legacy_test_commands);
+    if verification_commands.is_empty() {
+        return Err(WorkerError::from(structured_failure(
+            "missing_verification_commands",
+            "verification",
+            "No verification commands were provided",
+            Some(branch.clone()),
+            None,
+            None,
+        )));
+    }
 
-    let has_graphify_cmd = test_commands.iter().any(|c| c.contains("graphify update"));
-    let mut graphify_updated = false;
-    if has_graphify_cmd {
-        graphify_updated = run_graphify_update(repo_dir, logs).await;
-        if !graphify_updated {
-            logs.push("[WARNING] graphify update . failed or was not found. "
-                .to_string() + "The knowledge graph may be out of date.");
-        }
+    let (verification_results, tests_passed, graphify_updated) =
+        run_verification_commands(repo_dir, &verification_commands, logs).await;
+
+    if !tests_passed {
+        return Err(WorkerError::from(structured_failure(
+            "verification_failed",
+            "verification",
+            "One or more verification commands failed",
+            Some(branch.clone()),
+            None,
+            Some(json!({ "verification_results": verification_results })),
+        )));
     }
 
     let status = crate::git::git_status_porcelain(repo_dir, logs)
         .await
-        .unwrap_or_default();
+        .map_err(WorkerError::Git)?;
     let mut commit_sha = crate::git::git_rev_parse_head(repo_dir, logs)
         .await
-        .unwrap_or_default();
+        .map_err(WorkerError::Git)?;
 
     if !status.trim().is_empty() {
         crate::git::git_add_all(repo_dir, logs)
             .await
-            .map_err(|e| WorkerError::Git(e))?;
-        let message = payload_obj
+            .map_err(WorkerError::Git)?;
+        let commit_message = payload_obj
             .get("commit_message")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
             .unwrap_or_else(|| format!("feat: idea refinery task {}", &job.id[..job.id.len().min(8)]));
-        crate::git::git_commit(repo_dir, &message, logs).await.ok();
+        crate::git::git_commit(repo_dir, &commit_message, logs)
+            .await
+            .map_err(WorkerError::Git)?;
         commit_sha = crate::git::git_rev_parse_head(repo_dir, logs)
             .await
-            .unwrap_or_default();
+            .map_err(WorkerError::Git)?;
         crate::git::git_push(repo_dir, &branch, "origin", logs)
             .await
-            .ok();
+            .map_err(WorkerError::Git)?;
     }
+
+    let draft_pull_request = resolve_draft_pull_request_metadata(&payload_obj);
+    let draft_pull_request_todo = draft_pull_request.is_none().then(|| {
+        "TODO: integrate draft pull request creation via backend/app/services/github_app.py and surface the returned metadata here.".to_string()
+    });
 
     Ok(crate::types::BranchWorkResult {
         branch_name: branch,
@@ -644,81 +857,99 @@ async fn branch_work_with_server(
         commit_message: payload_obj
             .get("commit_message")
             .and_then(|v| v.as_str())
-            .unwrap_or(&format!(
-                "IdeaRefinery task {}",
-                &job.id[..job.id.len().min(8)]
-            ))
-            .to_string(),
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("IdeaRefinery task {}", &job.id[..job.id.len().min(8)])),
         agent_output: cb_result.output,
         tests_passed,
         full_control_used: full_control,
+        verification_results,
         graphify_updated,
         ledger_updated: false,
         ledger_sections_updated: Vec::new(),
+        draft_pull_request,
+        draft_pull_request_todo,
     })
 }
 
-async fn run_tests(repo_dir: &PathBuf, commands: &[String], logs: &mut Vec<String>) -> bool {
-    let mut cmds = commands.to_vec();
-    if cmds.is_empty() {
-        let index = crate::indexing::index_repo(repo_dir).await;
-        cmds = index.test_commands;
-    }
-    let mut ok = true;
-    for command in cmds.iter().take(4) {
+async fn run_verification_commands(
+    repo_dir: &PathBuf,
+    commands: &[String],
+    logs: &mut Vec<String>,
+) -> (Vec<VerificationResult>, bool, bool) {
+    let mut results = Vec::new();
+    let mut all_passed = true;
+    let mut graphify_updated = false;
+
+    for command in commands {
+        let command = command.trim();
+        if command.is_empty() {
+            continue;
+        }
+
+        let start = Instant::now();
         let parts: Vec<&str> = command.split_whitespace().collect();
         if parts.is_empty() {
             continue;
         }
-        let mut cmd = tokio::process::Command::new(parts[0]);
-        cmd.current_dir(repo_dir);
-        cmd.args(&parts[1..]);
+
         logs.push(format!("$ {}", command));
-        let output = match cmd.output().await {
-            Ok(o) => o,
-            Err(e) => {
-                logs.push(format!("Failed to run test: {}", e));
-                ok = false;
+        let output = match tokio::process::Command::new(parts[0])
+            .current_dir(repo_dir)
+            .args(&parts[1..])
+            .output()
+            .await
+        {
+            Ok(output) => output,
+            Err(error) => {
+                let result = VerificationResult {
+                    command: command.to_string(),
+                    status: "error".to_string(),
+                    exit_code: None,
+                    stdout_tail: String::new(),
+                    stderr_tail: tail_text(&error.to_string(), 1000),
+                    duration_seconds: start.elapsed().as_secs_f64(),
+                };
+                logs.push(result.stderr_tail.clone());
+                results.push(result);
+                all_passed = false;
                 continue;
             }
         };
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let combined = format!("{}{}", stdout, stderr);
-        if !combined.trim().is_empty() {
-            logs.push(combined.trim().to_string());
-        }
-        logs.push(format!(
-            "exit code: {}",
-            output.status.code().unwrap_or(-1)
-        ));
-        ok = ok && output.status.success();
-    }
-    ok
-}
 
-pub(crate) async fn run_graphify_update(repo_dir: &std::path::Path, logs: &mut Vec<String>) -> bool {
-    let mut cmd = tokio::process::Command::new("graphify");
-    cmd.current_dir(repo_dir);
-    cmd.arg("update");
-    cmd.arg(".");
-    logs.push("$ graphify update .".to_string());
-    match cmd.output().await {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let combined = format!("{}{}", stdout, stderr);
-            if !combined.trim().is_empty() {
-                logs.push(combined.trim().to_string());
-            }
-            logs.push(format!("exit code: {}", output.status.code().unwrap_or(-1)));
-            output.status.success()
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let stdout_tail = tail_text(&stdout, 1000);
+        let stderr_tail = tail_text(&stderr, 1000);
+        if !stdout_tail.trim().is_empty() {
+            logs.push(stdout_tail.clone());
         }
-        Err(e) => {
-            logs.push(format!("Failed to run graphify: {}", e));
-            false
+        if !stderr_tail.trim().is_empty() {
+            logs.push(stderr_tail.clone());
         }
+
+        let exit_code = output.status.code();
+        let status = if output.status.success() {
+            "passed"
+        } else {
+            all_passed = false;
+            "failed"
+        };
+        if command.contains("graphify update") && output.status.success() {
+            graphify_updated = true;
+        }
+
+        results.push(VerificationResult {
+            command: command.to_string(),
+            status: status.to_string(),
+            exit_code,
+            stdout_tail,
+            stderr_tail,
+            duration_seconds: start.elapsed().as_secs_f64(),
+        });
     }
+
+    (results, all_passed && !commands.is_empty(), graphify_updated)
 }
 
 fn slug(value: &str) -> String {

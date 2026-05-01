@@ -1,3 +1,4 @@
+use crate::types::WorkerFailure;
 use std::path::Path;
 use tokio::process::Command;
 
@@ -39,12 +40,59 @@ pub async fn ensure_repo<P: AsRef<Path>>(
     clone_url: &str,
     branch: &str,
     logs: &mut Vec<String>,
-) -> Result<(), String> {
+) -> Result<(), WorkerFailure> {
     let repo_dir = repo_dir.as_ref();
     if repo_dir.exists() {
-        git_run(repo_dir, &["fetch", "--all", "--prune"], logs).await.ok();
-        git_run(repo_dir, &["checkout", branch], logs).await.ok();
-        git_run(repo_dir, &["pull", "--ff-only"], logs).await.ok();
+        let status = git_status_porcelain(repo_dir, logs)
+            .await
+            .map_err(|message| WorkerFailure {
+                code: "repo_status_check_failed".to_string(),
+                stage: "preflight".to_string(),
+                message,
+                branch_name: Some(branch.to_string()),
+                repo_status: None,
+                details: None,
+            })?;
+        if !status.trim().is_empty() {
+            return Err(WorkerFailure {
+                code: "repo_dirty_preflight".to_string(),
+                stage: "branch_checkout".to_string(),
+                message: "Repository has uncommitted changes before branch checkout".to_string(),
+                branch_name: Some(branch.to_string()),
+                repo_status: Some(status),
+                details: None,
+            });
+        }
+        git_run(repo_dir, &["fetch", "--all", "--prune"], logs)
+            .await
+            .map_err(|message| WorkerFailure {
+                code: "repo_fetch_failed".to_string(),
+                stage: "repo_sync".to_string(),
+                message,
+                branch_name: Some(branch.to_string()),
+                repo_status: None,
+                details: None,
+            })?;
+        git_run(repo_dir, &["checkout", branch], logs)
+            .await
+            .map_err(|message| WorkerFailure {
+                code: "repo_checkout_failed".to_string(),
+                stage: "repo_sync".to_string(),
+                message,
+                branch_name: Some(branch.to_string()),
+                repo_status: None,
+                details: None,
+            })?;
+        git_run(repo_dir, &["pull", "--ff-only"], logs)
+            .await
+            .map_err(|message| WorkerFailure {
+                code: "repo_pull_failed".to_string(),
+                stage: "repo_sync".to_string(),
+                message,
+                branch_name: Some(branch.to_string()),
+                repo_status: None,
+                details: None,
+            })?;
         return Ok(());
     }
     let parent = repo_dir.parent();
@@ -56,7 +104,15 @@ pub async fn ensure_repo<P: AsRef<Path>>(
         &["clone", "--branch", branch, clone_url, repo_dir.to_str().unwrap_or("")],
         logs,
     )
-    .await?;
+    .await
+    .map_err(|message| WorkerFailure {
+        code: "repo_clone_failed".to_string(),
+        stage: "repo_clone".to_string(),
+        message,
+        branch_name: Some(branch.to_string()),
+        repo_status: None,
+        details: None,
+    })?;
     Ok(())
 }
 

@@ -5,6 +5,7 @@ pub enum WorkerError {
     Config(String),
     Git(String),
     Agent(String),
+    Structured(crate::types::WorkerFailure),
     OpenCode(crate::opencode_session::OpenCodeError),
     LiteLLM(crate::litellm::LiteLLMError),
     Sqs(String),
@@ -19,6 +20,12 @@ impl std::fmt::Display for WorkerError {
             WorkerError::Config(msg) => write!(f, "Config error: {msg}"),
             WorkerError::Git(msg) => write!(f, "Git error: {msg}"),
             WorkerError::Agent(msg) => write!(f, "Agent error: {msg}"),
+            WorkerError::Structured(failure) => {
+                match serde_json::to_string(failure) {
+                    Ok(text) => f.write_str(&text),
+                    Err(_) => write!(f, "Structured error: {:?}", failure),
+                }
+            }
             WorkerError::OpenCode(e) => write!(f, "OpenCode error: {e}"),
             WorkerError::LiteLLM(e) => write!(f, "LiteLLM error: {e}"),
             WorkerError::Sqs(msg) => write!(f, "SQS error: {msg}"),
@@ -46,6 +53,12 @@ impl From<crate::api::ApiError> for WorkerError {
 impl From<std::io::Error> for WorkerError {
     fn from(err: std::io::Error) -> Self {
         WorkerError::Io(err)
+    }
+}
+
+impl From<crate::types::WorkerFailure> for WorkerError {
+    fn from(err: crate::types::WorkerFailure) -> Self {
+        WorkerError::Structured(err)
     }
 }
 

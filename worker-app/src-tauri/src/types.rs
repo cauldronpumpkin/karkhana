@@ -187,6 +187,8 @@ pub struct Job {
     pub id: String,
     #[serde(rename = "job_type")]
     pub job_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_name: Option<String>,
     #[serde(default)]
     pub claim_token: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -282,11 +284,56 @@ pub struct BranchWorkResult {
     pub tests_passed: bool,
     pub full_control_used: bool,
     #[serde(default)]
+    pub verification_results: Vec<VerificationResult>,
+    #[serde(default)]
     pub graphify_updated: bool,
     #[serde(default)]
     pub ledger_updated: bool,
     #[serde(default)]
     pub ledger_sections_updated: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft_pull_request: Option<DraftPullRequestMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft_pull_request_todo: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VerificationResult {
+    pub command: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(default)]
+    pub stdout_tail: String,
+    #[serde(default)]
+    pub stderr_tail: String,
+    #[serde(default)]
+    pub duration_seconds: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DraftPullRequestMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub html_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorkerFailure {
+    pub code: String,
+    pub stage: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

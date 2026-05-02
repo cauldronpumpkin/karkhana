@@ -18,6 +18,16 @@ const dashboard = {
       capabilities: ['repo_index'],
       last_seen_at: null,
     },
+    {
+      id: 'worker-revoked',
+      display_name: 'Old Build Box',
+      machine_name: 'WIN-OLD-1',
+      platform: 'Windows',
+      engine: 'openclaude',
+      status: 'revoked',
+      capabilities: ['repo_index'],
+      last_seen_at: null,
+    },
   ],
   requests: [
     {
@@ -190,10 +200,10 @@ describe('LocalWorkers', () => {
   it('rotates and revokes approved workers', async () => {
     render(LocalWorkers);
 
-    const rotateButton = await screen.findByRole('button', { name: /rotate/i });
+    const rotateButton = (await screen.findAllByRole('button', { name: /^rotate$/i })).find((button) => !button.disabled);
     await fireEvent.click(rotateButton);
 
-    const revokeButton = await screen.findByRole('button', { name: /revoke/i });
+    const revokeButton = (await screen.findAllByRole('button', { name: /^revoke$/i })).find((button) => !button.disabled);
     await fireEvent.click(revokeButton);
 
     await waitFor(() => {
@@ -203,6 +213,20 @@ describe('LocalWorkers', () => {
       );
       expect(fetch).toHaveBeenCalledWith(
         '/api/local-workers/worker-1/revoke',
+        expect.objectContaining({ method: 'POST', body: '{}' })
+      );
+    });
+  });
+
+  it('purges revoked workers', async () => {
+    render(LocalWorkers);
+
+    const purgeButton = await screen.findByRole('button', { name: /purge revoked/i });
+    await fireEvent.click(purgeButton);
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        '/api/local-workers/purge-revoked',
         expect.objectContaining({ method: 'POST', body: '{}' })
       );
     });

@@ -134,6 +134,18 @@ class LocalWorkerService:
             await repo.save_worker_credential_lease(lease)
         return {"worker": self._public_worker(worker)}
 
+    async def purge_revoked_workers(self) -> dict[str, Any]:
+        repo = get_repository()
+        cutoff = utcnow() - timedelta(days=30)
+        purged = 0
+        for worker in await repo.list_local_workers():
+            if worker.status != "revoked" or worker.updated_at > cutoff:
+                continue
+            await self._requeue_worker_jobs(worker.id)
+            await repo.delete_local_worker(worker.id)
+            purged += 1
+        return {"purged": purged}
+
     async def rotate_credentials(self, worker_id: str) -> dict[str, Any]:
         worker = await self._worker_or_404(worker_id)
         if worker.status != "approved":
@@ -218,6 +230,17 @@ class LocalWorkerService:
         if worker:
             worker.last_seen_at = utcnow()
             await get_repository().save_local_worker(worker)
+
+    async def _requeue_worker_jobs(self, worker_id: str) -> None:
+        repo = get_repository()
+        for item in await repo.list_work_items(statuses={"claimed", "running"}):
+            if item.worker_id != worker_id:
+                continue
+            item.status = "waiting_for_machine"
+            item.worker_id = None
+            item.claim_token = None
+            item.error = "Worker was revoked"
+            await repo.save_work_item(item)
 
     async def _issue_credentials(self, worker: LocalWorker, api_token: str) -> WorkerCredentialLease:
         expires_at = utcnow() + timedelta(seconds=settings.worker_credential_ttl_seconds)

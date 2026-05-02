@@ -65,6 +65,13 @@ impl Default for PermissionPolicy {
 
 pub fn write_agents_md(workspace: &Path) -> Result<std::path::PathBuf, String> {
     let agents_path = workspace.join("AGENTS.md");
+    let backup_path = workspace.join("AGENTS.md.bak");
+    if agents_path.exists() && !backup_path.exists() {
+        let existing = std::fs::read(&agents_path)
+            .map_err(|e| format!("Failed to back up existing AGENTS.md: {}", e))?;
+        std::fs::write(&backup_path, existing)
+            .map_err(|e| format!("Failed to create AGENTS.md backup: {}", e))?;
+    }
     std::fs::write(&agents_path, AGENTS_MD_CONTENT)
         .map_err(|e| format!("Failed to write AGENTS.md: {}", e))?;
     Ok(agents_path)
@@ -72,7 +79,15 @@ pub fn write_agents_md(workspace: &Path) -> Result<std::path::PathBuf, String> {
 
 pub fn remove_agents_md(workspace: &Path) -> Result<(), String> {
     let agents_path = workspace.join("AGENTS.md");
-    if agents_path.exists() {
+    let backup_path = workspace.join("AGENTS.md.bak");
+    if backup_path.exists() {
+        let backup = std::fs::read(&backup_path)
+            .map_err(|e| format!("Failed to read AGENTS.md backup: {}", e))?;
+        std::fs::write(&agents_path, backup)
+            .map_err(|e| format!("Failed to restore AGENTS.md from backup: {}", e))?;
+        std::fs::remove_file(&backup_path)
+            .map_err(|e| format!("Failed to remove AGENTS.md backup: {}", e))?;
+    } else if agents_path.exists() {
         std::fs::remove_file(&agents_path)
             .map_err(|e| format!("Failed to remove AGENTS.md: {}", e))?;
     }

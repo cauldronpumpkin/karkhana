@@ -273,3 +273,39 @@ async def test_revoked_worker_cannot_update_claimed_job_with_shared_token(test_c
         assert response.json()["detail"] == "Worker is not approved"
     finally:
         settings.worker_auth_token = original_token
+
+
+@pytest.mark.asyncio
+async def test_purge_revoked_workers_deletes_worker_data(test_client: AsyncClient):
+    _, _, keep_worker, _ = await _approved_worker(test_client)
+    _, _, worker, credentials = await _approved_worker(test_client)
+
+    await test_client.post(
+        "/api/ideas/import/github",
+        json={"installation_id": "12345", "repo_full_name": "cauld/purge-worker-app", "default_branch": "main"},
+    )
+    claim = (
+        await test_client.post(
+            "/api/worker/claim",
+            json={"worker_id": worker["id"], "capabilities": ["repo_index"]},
+            headers={"Authorization": f"Bearer {credentials['api_token']}"},
+        )
+    ).json()["claim"]
+
+    await test_client.post(f"/api/local-workers/{worker['id']}/revoke")
+    worker_record = await get_repository().get_local_worker(worker["id"])
+    assert worker_record is not None
+    worker_record.updated_at = utcnow() - timedelta(days=31)
+    get_repository().local_workers[worker_record.id] = worker_record
+
+    purged = await test_client.post("/api/local-workers/purge-revoked")
+    assert purged.status_code == 200
+    assert purged.json()["purged"] >= 1
+    assert await get_repository().get_local_worker(worker["id"]) is None
+    assert await get_repository().get_worker_credential_lease(worker["id"]) is None
+    assert await get_repository().list_worker_events(worker["id"]) == []
+    assert await get_repository().get_local_worker(keep_worker["id"]) is not None
+
+    job = await get_repository().get_work_item(claim["job"]["id"])
+    assert job.status == "waiting_for_machine"
+    assert job.worker_id is None

@@ -61,7 +61,7 @@ async fn run_server_agent<P: AsRef<Path>>(
     match client.health().await {
         Ok(health) if health.healthy => {}
         _ => {
-            logs.push("OpenCode server not available, falling back to CLI".to_string());
+            logs.push("OpenCode server not available; server mode requires a healthy OpenCode endpoint".to_string());
             return String::new();
         }
     }
@@ -155,6 +155,11 @@ async fn run_cli_agent<P: AsRef<Path>>(
         cmd.push(prompt.to_string());
         let args: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
         return run_command(&args, repo_dir, logs).await;
+    }
+
+    if engine == "opencode-server" {
+        logs.push("OpenCode server mode requested without a server client; refusing CLI fallback.".to_string());
+        return String::new();
     }
 
     if engine == "opencode" && which::which("opencode").is_ok() {

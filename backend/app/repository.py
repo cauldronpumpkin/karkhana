@@ -690,6 +690,7 @@ class Repository:
     async def save_local_worker(self, worker: LocalWorker) -> LocalWorker: ...
     async def get_local_worker(self, worker_id: str) -> LocalWorker | None: ...
     async def list_local_workers(self) -> list[LocalWorker]: ...
+    async def delete_local_worker(self, worker_id: str) -> None: ...
     async def save_worker_connection_request(self, request: WorkerConnectionRequest) -> WorkerConnectionRequest: ...
     async def get_worker_connection_request(self, request_id: str) -> WorkerConnectionRequest | None: ...
     async def list_worker_connection_requests(self) -> list[WorkerConnectionRequest]: ...
@@ -1002,6 +1003,11 @@ class InMemoryRepository(Repository):
     async def list_local_workers(self) -> list[LocalWorker]:
         return sorted(self.local_workers.values(), key=lambda item: item.updated_at, reverse=True)
 
+    async def delete_local_worker(self, worker_id: str) -> None:
+        self.local_workers.pop(worker_id, None)
+        self.worker_leases.pop(worker_id, None)
+        self.worker_events = {event_id: event for event_id, event in self.worker_events.items() if event.worker_id != worker_id}
+
     async def save_worker_connection_request(self, request: WorkerConnectionRequest) -> WorkerConnectionRequest:
         request.updated_at = utcnow()
         self.worker_requests[request.id] = request
@@ -1238,8 +1244,16 @@ class DynamoDBRepository(Repository):
         condition = self._Key("PK").eq(pk)
         if prefix:
             condition &= self._Key("SK").begins_with(prefix)
-        response = self.table.query(KeyConditionExpression=condition)
-        return [_clean_from_dynamo(i) for i in response.get("Items", [])]
+        items: list[dict[str, Any]] = []
+        kwargs: dict[str, Any] = {"KeyConditionExpression": condition}
+        while True:
+            response = self.table.query(**kwargs)
+            items.extend(_clean_from_dynamo(i) for i in response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            kwargs["ExclusiveStartKey"] = last_key
+        return items
 
     async def create_idea(self, idea: Idea) -> Idea:
         return await self.save_idea(idea)
@@ -1532,17 +1546,23 @@ class DynamoDBRepository(Repository):
 
     async def list_work_items(self, idea_id: str | None = None, statuses: set[str] | None = None) -> list[WorkItem]:
         if idea_id:
-            response = self.table.query(
-                IndexName="GSI2",
-                KeyConditionExpression=self._Key("GSI2PK").eq(f"IDEA#{idea_id}") & self._Key("GSI2SK").begins_with("JOB#"),
-            )
-            raw = [_clean_from_dynamo(item) for item in response.get("Items", [])]
+            kwargs: dict[str, Any] = {
+                "IndexName": "GSI2",
+                "KeyConditionExpression": self._Key("GSI2PK").eq(f"IDEA#{idea_id}") & self._Key("GSI2SK").begins_with("JOB#"),
+            }
         else:
-            response = self.table.query(
-                IndexName="GSI1",
-                KeyConditionExpression=self._Key("GSI1PK").eq("WORK_ITEMS"),
-            )
-            raw = [_clean_from_dynamo(item) for item in response.get("Items", [])]
+            kwargs = {
+                "IndexName": "GSI1",
+                "KeyConditionExpression": self._Key("GSI1PK").eq("WORK_ITEMS"),
+            }
+        raw: list[dict[str, Any]] = []
+        while True:
+            response = self.table.query(**kwargs)
+            raw.extend(_clean_from_dynamo(item) for item in response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            kwargs["ExclusiveStartKey"] = last_key
         jobs = [self._work_item(item) for item in raw if not statuses or item.get("status") in statuses]
         return sorted(jobs, key=lambda item: (item.priority, item.created_at))
 
@@ -1599,6 +1619,10 @@ class DynamoDBRepository(Repository):
             KeyConditionExpression=self._Key("GSI1PK").eq("LOCAL_WORKERS"),
         )
         return [self._local_worker(_clean_from_dynamo(item)) for item in response.get("Items", [])]
+
+    async def delete_local_worker(self, worker_id: str) -> None:
+        for item in self._query_pk(f"LOCAL_WORKER#{worker_id}"):
+            self.table.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
 
     async def save_worker_connection_request(self, request: WorkerConnectionRequest) -> WorkerConnectionRequest:
         request.updated_at = utcnow()

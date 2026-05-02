@@ -78,10 +78,7 @@ pub fn load_config_from_dir(base_dir: impl AsRef<Path>) -> WorkerConfig {
         );
     }
 
-    serde_json::from_value(data).unwrap_or_else(|_| WorkerConfig {
-        api_base: "https://api.karkhana.one".to_string(),
-        ..Default::default()
-    })
+    serde_json::from_value(data).unwrap_or_else(|_| WorkerConfig::default())
 }
 
 pub fn load_config() -> WorkerConfig {

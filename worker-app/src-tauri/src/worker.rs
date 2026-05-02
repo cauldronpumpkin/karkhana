@@ -201,6 +201,20 @@ fn structured_failure(
     }
 }
 
+pub fn is_opencode_server_engine(engine: &str) -> bool {
+    engine == "opencode-server"
+}
+
+pub fn opencode_contract_failure(
+    code: &str,
+    stage: &str,
+    message: impl Into<String>,
+    branch_name: Option<String>,
+    details: Option<Value>,
+) -> WorkerFailure {
+    structured_failure(code, stage, message, branch_name, None, details)
+}
+
 static WORKER_RUNNING: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
@@ -272,7 +286,7 @@ async fn run_worker_loop(app: &AppHandle) -> Result<(), WorkerError> {
         ctx.config.capabilities.iter().any(|c| c == cap)
     });
 
-    if ctx.config.engine == "opencode-server" || ctx.config.opencode_server_url.is_some() {
+    if is_opencode_server_engine(&ctx.config.engine) || ctx.config.opencode_server_url.is_some() {
         let base_url = ctx
             .config
             .opencode_server_url
@@ -473,7 +487,7 @@ async fn process_job(
         max_identical_failures: 3,
     };
 
-    let use_server = ctx.config.engine == "opencode-server"
+    let use_server = is_opencode_server_engine(&ctx.config.engine)
         || ctx.config.opencode_server_url.is_some();
 
     match job.job_type.as_str() {
@@ -556,6 +570,22 @@ async fn run_with_circuit_breaker(
     if let Some(ref opencode_client) = ctx.opencode_client {
         let client_clone = opencode_client.clone();
         run_server_with_breaker(&client_clone, ctx, repo_dir, prompt, limits, logs).await
+    } else if is_opencode_server_engine(&ctx.config.engine) {
+        CircuitBreakerResult {
+            output: String::new(),
+            session_id: None,
+            diff: String::new(),
+            error: Some(opencode_contract_failure(
+                "opencode_server_unavailable",
+                "opencode_init",
+                "OpenCode server mode was requested but no client was initialized",
+                None,
+                Some(json!({
+                    "engine": ctx.config.engine,
+                    "opencode_server_url": ctx.config.opencode_server_url,
+                })),
+            )),
+        }
     } else {
         let output = run_agent(
             repo_dir,
@@ -582,6 +612,38 @@ async fn run_server_with_breaker(
     limits: &CircuitBreakerLimits,
     logs: &mut Vec<String>,
 ) -> CircuitBreakerResult {
+    match opencode_client.health().await {
+        Ok(health) if health.healthy => {}
+        Ok(health) => {
+            return CircuitBreakerResult {
+                output: String::new(),
+                session_id: None,
+                diff: String::new(),
+                error: Some(opencode_contract_failure(
+                    "opencode_health_unhealthy",
+                    "opencode_health",
+                    "OpenCode server reported unhealthy status",
+                    None,
+                    Some(json!({ "health": health })),
+                )),
+            };
+        }
+        Err(e) => {
+            return CircuitBreakerResult {
+                output: String::new(),
+                session_id: None,
+                diff: String::new(),
+                error: Some(opencode_contract_failure(
+                    "opencode_health_failed",
+                    "opencode_health",
+                    e.to_string(),
+                    None,
+                    None,
+                )),
+            };
+        }
+    }
+
     let session = match opencode_client.create_session("idearefinery-task").await {
         Ok(s) => s,
         Err(e) => {
@@ -684,14 +746,28 @@ async fn run_server_with_breaker(
                 None
             };
 
-            let diff = opencode_client
-                .get_diff(&session.id)
-                .await
-                .unwrap_or_default()
-                .iter()
-                .map(|d| d.data.to_string())
-                .collect::<Vec<_>>()
-                .join("\n");
+            let diff = match opencode_client.get_diff(&session.id).await {
+                Ok(items) => items
+                    .iter()
+                    .map(|d| d.data.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                Err(e) => {
+                    let _ = opencode_client.delete_session(&session.id).await;
+                    return CircuitBreakerResult {
+                        output,
+                        session_id: Some(session.id.clone()),
+                        diff: String::new(),
+                        error: Some(opencode_contract_failure(
+                            "opencode_diff_failed",
+                            "opencode_diff",
+                            e.to_string(),
+                            Some(session.id.clone()),
+                            None,
+                        )),
+                    };
+                }
+            };
 
             let _ = opencode_client.delete_session(&session.id).await;
 

@@ -83,6 +83,11 @@ async def revoke_worker(worker_id: str):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.post("/purge-revoked")
+async def purge_revoked_workers():
+    return await get_service().purge_revoked_workers()
+
+
 @router.post("/{worker_id}/rotate-credentials")
 async def rotate_credentials(worker_id: str):
     try:

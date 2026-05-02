@@ -82,6 +82,7 @@ pub enum OpenCodeError {
     Network(String),
     Http { status: u16, body: String },
     Json(String),
+    Contract { code: String, stage: String, details: String },
 }
 
 impl std::fmt::Display for OpenCodeError {
@@ -90,6 +91,9 @@ impl std::fmt::Display for OpenCodeError {
             OpenCodeError::Network(msg) => write!(f, "Network error: {msg}"),
             OpenCodeError::Http { status, body } => write!(f, "HTTP {status}: {body}"),
             OpenCodeError::Json(msg) => write!(f, "JSON error: {msg}"),
+            OpenCodeError::Contract { code, stage, details } => {
+                write!(f, "Contract error [{code}] at {stage}: {details}")
+            }
         }
     }
 }
@@ -109,7 +113,16 @@ impl OpenCodeClient {
 
     pub async fn health(&self) -> Result<HealthResponse, OpenCodeError> {
         let val = self.get_json("/global/health").await?;
-        serde_json::from_value(val).map_err(|e| OpenCodeError::Json(e.to_string()))
+        let health: HealthResponse = serde_json::from_value(val)
+            .map_err(|e| OpenCodeError::Json(e.to_string()))?;
+        if health.version.trim().is_empty() {
+            return Err(OpenCodeError::Contract {
+                code: "opencode_health_invalid".to_string(),
+                stage: "health".to_string(),
+                details: "missing version".to_string(),
+            });
+        }
+        Ok(health)
     }
 
     pub async fn create_session(&self, title: &str) -> Result<Session, OpenCodeError> {
@@ -149,7 +162,16 @@ impl OpenCodeClient {
     ) -> Result<MessageResponse, OpenCodeError> {
         let path = format!("/session/{session_id}/message");
         let val = self.post_json(&path, req).await?;
-        serde_json::from_value(val).map_err(|e| OpenCodeError::Json(e.to_string()))
+        let response: MessageResponse = serde_json::from_value(val)
+            .map_err(|e| OpenCodeError::Json(e.to_string()))?;
+        if response.parts.is_empty() {
+            return Err(OpenCodeError::Contract {
+                code: "opencode_message_invalid".to_string(),
+                stage: "message".to_string(),
+                details: "empty parts".to_string(),
+            });
+        }
+        Ok(response)
     }
 
     pub async fn send_prompt_async(

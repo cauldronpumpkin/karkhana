@@ -84,7 +84,7 @@ fn default_display_name() -> String {
 }
 
 fn default_engine() -> String {
-    "openclaude".to_string()
+    "opencode-server".to_string()
 }
 
 fn default_workspace_root() -> String {

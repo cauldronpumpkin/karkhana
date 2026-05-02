@@ -27,6 +27,7 @@
 
   let pendingRequests = $derived(state.requests.filter((r) => r.status === 'pending'));
   let approvedWorkers = $derived(state.workers.filter((w) => w.status === 'approved'));
+  let hasRevokedWorkers = $derived(state.workers.some((w) => w.status === 'revoked'));
   let activeJobs = $derived((state.jobs || []).filter((j) => ['queued', 'waiting_for_machine', 'failed_retryable', 'claimed', 'running'].includes(j.status)));
   let failedJobs = $derived((state.jobs || []).filter((j) => j.status?.includes('failed')));
 
@@ -179,6 +180,13 @@
   async function rotate(workerId) {
     await act(`rotate:${workerId}`, async () => {
       await gwPost(`/api/local-workers/${workerId}/rotate-credentials`, {});
+      await loadWorkers();
+    });
+  }
+
+  async function purgeRevoked() {
+    await act('purge-revoked', async () => {
+      await gwPost('/api/local-workers/purge-revoked', {});
       await loadWorkers();
     });
   }
@@ -336,7 +344,12 @@
     <section class="panel">
       <header>
         <h2><ServerCog size={18} /> Connected Workers</h2>
-        <Badge variant="primary">{state.workers.length}</Badge>
+        <div class="header-actions">
+          <Button size="sm" variant="danger" onclick={purgeRevoked} disabled={!hasRevokedWorkers || isActing === 'purge-revoked'}>
+            {#if isActing === 'purge-revoked'}<span class="spin"><Loader2 size={14} /></span> Purging{:else}<ShieldOff size={14} /> Purge Revoked{/if}
+          </Button>
+          <Badge variant="primary">{state.workers.length}</Badge>
+        </div>
       </header>
       {#if state.workers.length}
         <div class="row-list">
@@ -491,7 +504,7 @@
   .hero { margin-bottom: var(--spacing-lg); }
   .hero h1 { color: var(--color-text); font-size: 2.2rem; line-height: 1; margin: var(--spacing-xs) 0; }
   .hero p, .panel p, .panel small, .request-row span, .worker-row span { color: var(--color-text-secondary); }
-  .hero-actions, .row-actions { align-items: center; display: flex; flex-wrap: wrap; gap: var(--spacing-sm); }
+  .hero-actions, .row-actions, .header-actions { align-items: center; display: flex; flex-wrap: wrap; gap: var(--spacing-sm); }
   .status-grid, .workspace { display: grid; gap: var(--spacing-md); margin-bottom: var(--spacing-lg); }
   .status-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .workspace { grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); }

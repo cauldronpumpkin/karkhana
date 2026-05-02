@@ -1,23 +1,63 @@
 use crate::types::WorkerConfig;
 use serde_json;
 use std::env;
+use std::path::Path;
 use std::path::PathBuf;
 
+const WORKER_DIR: &str = "idearefinery-worker";
+const LEGACY_WORKER_DIR: &str = "openclaude-local";
+const CONFIG_FILE: &str = "worker-config.json";
+
 pub fn config_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("idearefinery-worker")
-        .join("worker-config.json")
+    config_path_in(dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")))
 }
 
-pub fn load_config() -> WorkerConfig {
-    let path = config_path();
-    let mut data: serde_json::Value = if path.exists() {
-        let content = std::fs::read_to_string(&path).unwrap_or_default();
-        serde_json::from_str(&content).unwrap_or_default()
+pub fn config_path_in(base_dir: impl AsRef<Path>) -> PathBuf {
+    base_dir.as_ref().join(WORKER_DIR).join(CONFIG_FILE)
+}
+
+fn legacy_config_paths_in(base_dir: impl AsRef<Path>) -> [PathBuf; 2] {
+    let base = base_dir.as_ref();
+    [
+        base.join(LEGACY_WORKER_DIR).join(CONFIG_FILE),
+        base.join(WORKER_DIR).join(LEGACY_WORKER_DIR).join(CONFIG_FILE),
+    ]
+}
+
+fn read_config_value(path: &Path) -> Option<serde_json::Value> {
+    let content = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+fn write_config_value(path: &Path, value: &serde_json::Value) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
+    std::fs::write(path, content).map_err(|e| e.to_string())
+}
+
+pub fn load_config_from_dir(base_dir: impl AsRef<Path>) -> WorkerConfig {
+    let current_path = config_path_in(base_dir.as_ref());
+    let legacy_paths = legacy_config_paths_in(base_dir);
+
+    let current_value = read_config_value(&current_path);
+    let legacy_value = if current_value.is_none() {
+        legacy_paths.iter().find_map(|path| read_config_value(path))
     } else {
-        serde_json::Value::Object(Default::default())
+        None
     };
+
+    let mut data = current_value
+        .clone()
+        .or(legacy_value.clone())
+        .unwrap_or_else(|| serde_json::Value::Object(Default::default()));
+
+    if current_value.is_none() {
+        if let Some(legacy) = legacy_value.as_ref() {
+            let _ = write_config_value(&current_path, legacy);
+        }
+    }
 
     if let Ok(env_api_base) = env::var("IDEAREFINERY_API_BASE_URL") {
         data["api_base"] = serde_json::Value::String(env_api_base);
@@ -44,13 +84,18 @@ pub fn load_config() -> WorkerConfig {
     })
 }
 
+pub fn load_config() -> WorkerConfig {
+    load_config_from_dir(dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")))
+}
+
 pub fn save_config(config: &WorkerConfig) -> Result<(), String> {
-    let path = config_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let content = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
-    std::fs::write(&path, content).map_err(|e| e.to_string())
+    save_config_to_dir(dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")), config)
+}
+
+pub fn save_config_to_dir(base_dir: impl AsRef<Path>, config: &WorkerConfig) -> Result<(), String> {
+    let path = config_path_in(base_dir);
+    let value = serde_json::to_value(config).map_err(|e| e.to_string())?;
+    write_config_value(&path, &value)
 }
 
 #[tauri::command]

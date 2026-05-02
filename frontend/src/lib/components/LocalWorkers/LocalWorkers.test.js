@@ -43,12 +43,49 @@ const dashboard = {
     agent_name: 'build',
     command: 'opencode run --dangerously-skip-permissions <prompt>',
     branch_name: 'factory/job-1/fix',
+    draft_pr: {
+      html_url: 'https://github.com/acme/factory/pull/12',
+      url: 'https://api.github.com/repos/acme/factory/pulls/12',
+      number: 12,
+      state: 'open',
+      draft: true,
+    },
     payload: { prompt: 'Fix the worker bridge' },
     error: 'worker command failed',
     debug_prompt: 'Debug this failed Idea Refinery local-worker job in OpenCode.',
-    result: { agent_output: 'partial output' },
+    logs_tail: 'tail log line 1\ntail log line 2',
+    verification_results: [
+      { command: 'pnpm test', status: 'passed', summary: 'test suite passed' },
+      { command: 'graphify update .', status: 'failed', summary: 'graphify update was skipped' },
+    ],
+    graphify_updated: false,
+    graphify_status: 'required',
+    needs_human_review: true,
+    review_reason: 'Graphify update was not completed.',
+    result: {
+      agent_output: 'partial output',
+      verification_results: [
+        { command: 'pnpm test', status: 'passed', summary: 'test suite passed' },
+        { command: 'graphify update .', status: 'failed', summary: 'graphify update was skipped' },
+      ],
+      graphify_updated: false,
+      graphify_status: 'required',
+      draft_pr: {
+        html_url: 'https://github.com/acme/factory/pull/12',
+        url: 'https://api.github.com/repos/acme/factory/pulls/12',
+        number: 12,
+        state: 'open',
+        draft: true,
+      },
+      review_reason: 'Graphify update was not completed.',
+    },
   }],
   sqs: { commands_configured: true, events_configured: true, region: 'us-east-1' },
+};
+
+const dashboardWithNoJobs = {
+  ...dashboard,
+  jobs: [],
 };
 
 describe('LocalWorkers', () => {
@@ -80,16 +117,60 @@ describe('LocalWorkers', () => {
     expect(screen.getByText('Worker management')).toBeInTheDocument();
   });
 
-  it('renders OpenCode job diagnostics', async () => {
+  it('renders OpenCode job diagnostics and Level 1 autonomy inspection state', async () => {
     render(LocalWorkers);
 
     expect((await screen.findAllByText('agent_branch_work')).length).toBeGreaterThan(0);
-    expect(screen.getByText(/OpenCode: opencode · gpt-test · build/i)).toBeInTheDocument();
-    expect(screen.getByText(/Branch: factory\/job-1\/fix/i)).toBeInTheDocument();
+    expect(screen.getByText(/OpenCode: opencode .* gpt-test .* build/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Branch: factory\/job-1\/fix/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Needs human review/i)).toBeInTheDocument();
+    expect(screen.getByText(/Reason: Graphify update was not completed\./i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /draft pr/i })).toHaveAttribute('href', 'https://github.com/acme/factory/pull/12');
+    expect(screen.getByText(/1\/2 verifications passed/i)).toBeInTheDocument();
+    expect(screen.getAllByText((_, element) => element?.textContent?.includes('Graphify: required')).length).toBeGreaterThan(0);
     expect(screen.getByText(/worker command failed/i)).toBeInTheDocument();
     expect(screen.getByText(/OpenCode command/i)).toBeInTheDocument();
     expect(screen.getByText(/Debug follow-up/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Logs$/i)).toBeInTheDocument();
+    expect(screen.getByText(/tail log line 1/i)).toBeInTheDocument();
     expect(screen.getByText(/failed or retryable job/i)).toBeInTheDocument();
+  });
+
+  it('renders draft PR links from nested draft_pr metadata', async () => {
+    render(LocalWorkers);
+
+    expect(await screen.findByRole('link', { name: /draft pr/i })).toHaveAttribute('href', 'https://github.com/acme/factory/pull/12');
+  });
+
+  it('renders an actionable empty state when no worker jobs are queued', async () => {
+    fetch.mockImplementation((url, options = {}) => {
+      if (url === '/api/local-workers' && !options.method) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(dashboardWithNoJobs) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    render(LocalWorkers);
+
+    expect(await screen.findByText('No worker jobs are waiting')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('1 approved worker ready when a build job is queued.');
+    });
+  });
+
+  it('renders an actionable error state when the worker dashboard fails to load', async () => {
+    fetch.mockImplementation((url) => {
+      if (url === '/api/local-workers') {
+        return Promise.resolve({ ok: false, status: 503 });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    render(LocalWorkers);
+
+    expect(await screen.findByText('Worker dashboard could not load')).toBeInTheDocument();
+    expect(screen.getByText('HTTP 503')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
 
   it('approves a worker request', async () => {

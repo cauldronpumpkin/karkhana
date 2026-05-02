@@ -18,7 +18,11 @@ class GitHubAppService:
     """GitHub App helper for installation metadata and short-lived tokens."""
 
     def is_configured(self) -> bool:
-        return bool(settings.github_app_id and self._private_key())
+        try:
+            self._require_configured()
+        except ValueError:
+            return False
+        return True
 
     def verify_webhook_signature(self, body: bytes, signature_header: str | None) -> bool:
         if not settings.github_webhook_secret:
@@ -79,7 +83,57 @@ class GitHubAppService:
                     repos.append(self._repo_to_dict(item, installation.installation_id))
         return repos
 
+    async def create_draft_pull_request(
+        self,
+        installation_id: str,
+        owner: str,
+        repo_name: str,
+        title: str,
+        head_branch: str,
+        base_branch: str,
+        body: str = "",
+    ) -> dict[str, Any]:
+        self._require_configured()
+        await self._require_active_installation(installation_id)
+        token = await self.create_installation_token(installation_id)
+        request_body = {
+            "title": title,
+            "head": head_branch,
+            "base": base_branch,
+            "body": body,
+            "draft": True,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                response = await client.post(
+                    f"{GITHUB_API_BASE}/repos/{owner}/{repo_name}/pulls",
+                    headers=self._installation_headers(token),
+                    json=request_body,
+                )
+                response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            response = exc.response
+            detail = response.text.strip() or response.reason_phrase
+            raise RuntimeError(
+                f"GitHub draft pull request creation failed "
+                f"({response.status_code}): {detail}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"GitHub draft pull request creation failed: {exc}") from exc
+
+        data = response.json()
+        return {
+            "url": data.get("url") or "",
+            "html_url": data.get("html_url") or "",
+            "number": data.get("number"),
+            "state": data.get("state") or "",
+            "draft": bool(data.get("draft", True)),
+        }
+
     async def create_installation_token(self, installation_id: str) -> str:
+        self._require_configured()
+        await self._require_active_installation(installation_id)
         token = self._app_jwt()
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.post(
@@ -122,6 +176,24 @@ class GitHubAppService:
         if settings.github_app_private_key_path:
             return Path(settings.github_app_private_key_path).read_text(encoding="utf-8")
         return ""
+
+    def _require_configured(self) -> None:
+        if not settings.github_app_id:
+            raise ValueError("GitHub App is not configured: missing GITHUB_APP_ID")
+        try:
+            private_key = self._private_key()
+        except OSError as exc:
+            raise ValueError(f"GitHub App private key could not be read: {exc}") from exc
+        if not private_key:
+            raise ValueError("GitHub App is not configured: missing private key")
+
+    async def _require_active_installation(self, installation_id: str) -> GitHubInstallation:
+        installation = await get_repository().get_github_installation(installation_id)
+        if installation is None:
+            raise ValueError(f"GitHub installation {installation_id} was not found")
+        if installation.status != "active":
+            raise ValueError(f"GitHub installation {installation_id} is not active")
+        return installation
 
     def _installation_headers(self, token: str) -> dict[str, str]:
         return {

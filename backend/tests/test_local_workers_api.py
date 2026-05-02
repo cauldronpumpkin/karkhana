@@ -86,18 +86,29 @@ async def test_worker_event_completes_existing_work_item(test_client: AsyncClien
             "payload": {
                 "work_item_id": claim["job"]["id"],
                 "claim_token": claim["job"]["claim_token"],
-                            "result": {"commit_sha": "def456", "tests_passed": True, "code_index": {"detected_stack": ["python"]}},
-                            "logs": "completed through event queue",
-                            "branch_name": "factory/job-1/fix",
-                        },
+                "result": {
+                    "commit_sha": "def456",
+                    "tests_passed": True,
+                    "code_index": {"detected_stack": ["python"]},
+                    "draft_pr": {
+                        "url": "https://github.com/cauld/sqs-app/pull/42",
+                        "number": 42,
+                        "title": "Factory fix",
                     },
-                )
+                },
+                "logs": "completed through event queue",
+                "branch_name": "factory/job-1/fix",
+            },
+        },
+    )
     assert event.status_code == 200
 
     status = (await test_client.get(f"/api/ideas/{idea_id}/project")).json()
     assert status["project"]["last_indexed_commit"] == "def456"
     assert status["jobs"][0]["status"] == "completed"
     assert status["jobs"][0]["branch_name"] == "factory/job-1/fix"
+    assert status["jobs"][0]["draft_pr"]["url"] == "https://github.com/cauld/sqs-app/pull/42"
+    assert status["jobs"][0]["draft_pr"]["number"] == 42
 
 
 @pytest.mark.asyncio

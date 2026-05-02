@@ -41,10 +41,15 @@ fn has_graphify_verification(payload: &serde_json::Value) -> bool {
         .map(|arr| {
             arr.iter()
                 .filter_map(|v| v.as_str())
-                .any(|c| c.contains("graphify update"))
+                .any(is_graphify_update_command)
         })
         .unwrap_or(false);
     cmds
+}
+
+fn is_graphify_update_command(command: &str) -> bool {
+    let mut parts = command.split_whitespace();
+    matches!(parts.next(), Some("graphify")) && matches!(parts.next(), Some("update"))
 }
 
 pub fn is_protected_branch_name(branch_name: &str, default_branch: Option<&str>) -> bool {
@@ -935,7 +940,7 @@ async fn run_verification_commands(
             all_passed = false;
             "failed"
         };
-        if command.contains("graphify update") && output.status.success() {
+        if is_graphify_update_command(command) && output.status.success() {
             graphify_updated = true;
         }
 
@@ -950,6 +955,20 @@ async fn run_verification_commands(
     }
 
     (results, all_passed && !commands.is_empty(), graphify_updated)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_graphify_update_command;
+
+    #[test]
+    fn graphify_update_detection_is_exact() {
+        assert!(is_graphify_update_command("graphify update ."));
+        assert!(is_graphify_update_command("graphify update"));
+        assert!(!is_graphify_update_command("echo graphify update ."));
+        assert!(!is_graphify_update_command("graphify status"));
+        assert!(!is_graphify_update_command("graphify-update ."));
+    }
 }
 
 fn slug(value: &str) -> String {

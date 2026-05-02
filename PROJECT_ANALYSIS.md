@@ -185,7 +185,7 @@ The project already contains:
 - Svelte 5 frontend with dashboard, chat, reports, actions, project twin, and local worker UI.
 - Project twin backend for importing GitHub repos, indexing, tracking health, queueing jobs, and tracking runs/commits.
 - Local worker backend APIs for registration, approval, token rotation, heartbeat, and job lifecycle.
-- Legacy Python local worker scripts.
+- Legacy Python local worker scripts have been removed; the Tauri worker app is the real local worker, and `workers/karigar` remains the mock readiness harness.
 - Tauri v2 worker desktop app in progress.
 - CloudFormation infrastructure for Lambda/API Gateway/DynamoDB/SQS.
 - Graphify knowledge graph output for code navigation.
@@ -805,4 +805,3 @@ Prefer practical next actions over generic advice. If the user asks what to do n
 | Date | Change |
 | --- | --- |
 | 2026-04-27 | Reworked from a static architecture report into a ChatGPT Project operating brief with progress tracking, Codex handoff templates, settled decisions, and prioritized workstreams. |
-

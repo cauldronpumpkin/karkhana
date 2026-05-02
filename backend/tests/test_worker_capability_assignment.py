@@ -13,6 +13,7 @@ from backend.app.repository import (
     set_repository,
     utcnow,
 )
+from backend.app.services import project_twin as project_twin_module
 from backend.app.services.project_twin import ProjectTwinService
 
 
@@ -36,6 +37,24 @@ def _full_capabilities():
     ]
 
 
+async def _seed_project(repo):
+    idea = Idea(title="Capability Test", slug="cap-test", description="test")
+    await repo.create_idea(idea)
+    project = ProjectTwin(
+        idea_id=idea.id,
+        provider="github",
+        installation_id="inst-1",
+        owner="acme",
+        repo="app",
+        repo_full_name="acme/app",
+        repo_url="https://github.com/acme/app",
+        clone_url="https://github.com/acme/app.git",
+        default_branch="main",
+    )
+    await repo.save_project_twin(project)
+    return idea.id, project.id
+
+
 async def _seed_work_item(repo, *,
     autonomy_level: str = "autonomous_development",
     job_type: str = "agent_branch_work",
@@ -43,28 +62,21 @@ async def _seed_work_item(repo, *,
     set_autonomy: bool = True,
     ledger_policy: str = "none",
     ledger_path: str | None = None,
+    verification_commands: list[str] | None = None,
+    test_commands: list[str] | None = None,
 ) -> str:
     if not project_id:
-        idea = Idea(title="Capability Test", slug="cap-test", description="test")
-        await repo.create_idea(idea)
-        project = ProjectTwin(
-            idea_id=idea.id,
-            provider="github",
-            installation_id="inst-1",
-            owner="acme",
-            repo="app",
-            repo_full_name="acme/app",
-            repo_url="https://github.com/acme/app",
-            clone_url="https://github.com/acme/app.git",
-            default_branch="main",
-        )
-        await repo.save_project_twin(project)
-        project_id = project.id
+        _, project_id = await _seed_project(repo)
 
-    payload: dict = {
+    payload: dict[str, object] = {
         "factory_run_id": "run-001",
-        "verification_commands": ["graphify update ."],
     }
+    if verification_commands is not None:
+        payload["verification_commands"] = verification_commands
+    elif test_commands is not None:
+        payload["test_commands"] = test_commands
+    else:
+        payload["verification_commands"] = ["graphify update ."]
     if set_autonomy:
         payload["autonomy_level"] = autonomy_level
     item = WorkItem(
@@ -195,6 +207,55 @@ class TestClaimJobAssignmentValidation:
         assert result["job"]["id"] == work_item_id
 
 
+class TestVerificationCommandNormalization:
+    @pytest.mark.asyncio
+    async def test_enqueue_job_normalizes_legacy_test_commands(self, repo):
+        idea_id, project_id = await _seed_project(repo)
+
+        class _NullPublisher:
+            async def send_job_available(self, *_args, **_kwargs):
+                return None
+
+        svc = ProjectTwinService(sqs_publisher=_NullPublisher())
+        job = await svc.enqueue_job(
+            idea_id=idea_id,
+            project_id=project_id,
+            job_type="agent_branch_work",
+            payload={
+                "factory_run_id": "run-legacy",
+                "test_commands": ["python -m pytest", "graphify update ."],
+                "autonomy_level": "suggest_only",
+            },
+            idempotency_key="legacy-enqueue",
+        )
+
+        stored = await repo.get_work_item(job.id)
+        assert stored is not None
+        assert stored.payload["verification_commands"] == ["python -m pytest", "graphify update ."]
+        assert "test_commands" not in stored.payload
+
+    @pytest.mark.asyncio
+    async def test_claim_job_normalizes_legacy_test_commands(self, repo):
+        await _seed_work_item(
+            repo,
+            autonomy_level="suggest_only",
+            test_commands=["python -m pytest", "graphify update ."],
+        )
+        svc = ProjectTwinService()
+        result = await svc.claim_job(
+            worker_id="worker-normalize",
+            capabilities=["agent_branch_work", "repo_index"],
+        )
+        assert result is not None
+        job = result["job"]
+        assert job["verification_commands"] == ["python -m pytest", "graphify update ."]
+
+        stored = await repo.get_work_item(job["id"])
+        assert stored is not None
+        assert stored.payload["verification_commands"] == ["python -m pytest", "graphify update ."]
+        assert "test_commands" not in stored.payload
+
+
 class TestEngineCapabilityConstants:
     def test_open_code_server_required_capabilities(self):
         from backend.app.services.autonomy import OPENCODE_SERVER_REQUIRED_CAPABILITIES
@@ -224,6 +285,39 @@ class TestEngineCapabilityConstants:
 class TestGraphifyEnforcement:
     @pytest.mark.asyncio
     async def test_complete_job_without_graphify_logs_warning(self, repo):
+        work_item_id = await _seed_work_item(
+            repo,
+            autonomy_level="suggest_only",
+            verification_commands=["graphify update ."],
+        )
+        svc = ProjectTwinService()
+        result = await svc.claim_job(
+            worker_id="worker-001",
+            capabilities=["agent_branch_work", "repo_index"],
+        )
+        assert result is not None
+        job_id = result["job"]["id"]
+        claim_token = result["job"]["claim_token"]
+        await svc.complete_job(
+            job_id=job_id,
+            claim_token=claim_token,
+            worker_id="worker-001",
+            result={
+                "summary": "Done",
+                "tests_passed": True,
+                "graphify_updated": False,
+                "verification_results": [
+                    {"command": "graphify update .", "status": "passed"},
+                ],
+            },
+        )
+        completed = await repo.get_work_item(job_id)
+        assert completed is not None
+        assert completed.status == "completed"
+        assert "graphify update" in (completed.logs or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_high_autonomy_without_graphify_fails_terminal(self, repo):
         work_item_id = await _seed_work_item(repo, autonomy_level="autonomous_development")
         svc = ProjectTwinService()
         result = await svc.claim_job(
@@ -237,12 +331,80 @@ class TestGraphifyEnforcement:
             job_id=job_id,
             claim_token=claim_token,
             worker_id="worker-001",
-            result={"summary": "Done", "tests_passed": True, "graphify_updated": False},
+            result={
+                "summary": "Done",
+                "tests_passed": True,
+                "graphify_updated": False,
+                "verification_results": [
+                    {"command": "graphify update .", "status": "passed"},
+                ],
+            },
         )
         completed = await repo.get_work_item(job_id)
         assert completed is not None
-        assert completed.status == "completed"
-        assert "graphify update" in (completed.logs or "").lower()
+        assert completed.status == "failed_terminal"
+        assert "graphify update" in (completed.error or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_high_autonomy_without_verification_evidence_fails_terminal(self, repo):
+        await _seed_work_item(
+            repo,
+            autonomy_level="autonomous_development",
+            verification_commands=["python -m pytest", "graphify update ."],
+        )
+        svc = ProjectTwinService()
+        result = await svc.claim_job(
+            worker_id="worker-002",
+            capabilities=_full_capabilities(),
+        )
+        assert result is not None
+        job_id = result["job"]["id"]
+        claim_token = result["job"]["claim_token"]
+        await svc.complete_job(
+            job_id=job_id,
+            claim_token=claim_token,
+            worker_id="worker-002",
+            result={"summary": "Done", "tests_passed": True, "graphify_updated": True},
+        )
+        completed = await repo.get_work_item(job_id)
+        assert completed is not None
+        assert completed.status == "failed_terminal"
+        assert "verification evidence" in (completed.error or "").lower()
+
+    @pytest.mark.parametrize("status", ["failed", "timed_out", "blocked"])
+    @pytest.mark.asyncio
+    async def test_high_autonomy_fails_terminal_on_bad_verification_status(self, repo, status):
+        await _seed_work_item(
+            repo,
+            autonomy_level="autonomous_development",
+            verification_commands=["python -m pytest", "graphify update ."],
+        )
+        svc = ProjectTwinService()
+        result = await svc.claim_job(
+            worker_id="worker-003",
+            capabilities=_full_capabilities(),
+        )
+        assert result is not None
+        job_id = result["job"]["id"]
+        claim_token = result["job"]["claim_token"]
+        await svc.complete_job(
+            job_id=job_id,
+            claim_token=claim_token,
+            worker_id="worker-003",
+            result={
+                "summary": "Done",
+                "tests_passed": False if status == "failed" else True,
+                "graphify_updated": True,
+                "verification_results": [
+                    {"command": "python -m pytest", "status": status},
+                    {"command": "graphify update .", "status": "passed"},
+                ],
+            },
+        )
+        completed = await repo.get_work_item(job_id)
+        assert completed is not None
+        assert completed.status == "failed_terminal"
+        assert status in (completed.error or "").lower()
 
 
 class TestLedgerCompletionEnforcement:
@@ -250,66 +412,8 @@ class TestLedgerCompletionEnforcement:
     async def test_required_missing_ledger_update_completes_with_warning(self, repo):
         await _seed_work_item(
             repo,
-            autonomy_level="autonomous_development",
+            autonomy_level="suggest_only",
             ledger_policy="required",
-            ledger_path="karkhana-runs/run-001.md",
-        )
-        svc = ProjectTwinService()
-        result = await svc.claim_job(
-            worker_id="worker-001",
-            capabilities=_full_capabilities(),
-        )
-        assert result is not None
-        job_id = result["job"]["id"]
-        claim_token = result["job"]["claim_token"]
-
-        await svc.complete_job(
-            job_id=job_id,
-            claim_token=claim_token,
-            worker_id="worker-001",
-            result={"summary": "Done", "tests_passed": True, "graphify_updated": True},
-        )
-
-        completed = await repo.get_work_item(job_id)
-        assert completed is not None
-        assert completed.status == "completed"
-        assert "ledger must be updated" in (completed.logs or "")
-
-    @pytest.mark.asyncio
-    async def test_strict_missing_ledger_update_fails_terminal(self, repo):
-        await _seed_work_item(
-            repo,
-            autonomy_level="autonomous_development",
-            ledger_policy="strict",
-            ledger_path="karkhana-runs/run-001.md",
-        )
-        svc = ProjectTwinService()
-        result = await svc.claim_job(
-            worker_id="worker-001",
-            capabilities=_full_capabilities(),
-        )
-        assert result is not None
-        job_id = result["job"]["id"]
-        claim_token = result["job"]["claim_token"]
-
-        await svc.complete_job(
-            job_id=job_id,
-            claim_token=claim_token,
-            worker_id="worker-001",
-            result={"summary": "Done", "tests_passed": True, "graphify_updated": True},
-        )
-
-        completed = await repo.get_work_item(job_id)
-        assert completed is not None
-        assert completed.status == "failed_terminal"
-        assert "ledger must be updated" in (completed.error or "")
-
-    @pytest.mark.asyncio
-    async def test_successful_completion_records_ledger_update_fields(self, repo):
-        await _seed_work_item(
-            repo,
-            autonomy_level="autonomous_development",
-            ledger_policy="strict",
             ledger_path="karkhana-runs/run-001.md",
         )
         svc = ProjectTwinService()
@@ -329,6 +433,83 @@ class TestLedgerCompletionEnforcement:
                 "summary": "Done",
                 "tests_passed": True,
                 "graphify_updated": True,
+                "verification_results": [
+                    {"command": "graphify update .", "status": "passed"},
+                ],
+            },
+        )
+
+        completed = await repo.get_work_item(job_id)
+        assert completed is not None
+        assert completed.status == "completed"
+        assert "ledger must be updated" in (completed.logs or "")
+
+    @pytest.mark.asyncio
+    async def test_strict_missing_ledger_update_fails_terminal(self, repo):
+        await _seed_work_item(
+            repo,
+            autonomy_level="autonomous_development",
+            ledger_policy="strict",
+            ledger_path="karkhana-runs/run-001.md",
+            verification_commands=["graphify update ."],
+        )
+        svc = ProjectTwinService()
+        result = await svc.claim_job(
+            worker_id="worker-001",
+            capabilities=_full_capabilities(),
+        )
+        assert result is not None
+        job_id = result["job"]["id"]
+        claim_token = result["job"]["claim_token"]
+
+        await svc.complete_job(
+            job_id=job_id,
+            claim_token=claim_token,
+            worker_id="worker-001",
+            result={
+                "summary": "Done",
+                "tests_passed": True,
+                "graphify_updated": True,
+                "verification_results": [
+                    {"command": "graphify update .", "status": "passed"},
+                ],
+            },
+        )
+
+        completed = await repo.get_work_item(job_id)
+        assert completed is not None
+        assert completed.status == "failed_terminal"
+        assert "ledger must be updated" in (completed.error or "")
+
+    @pytest.mark.asyncio
+    async def test_successful_completion_records_ledger_update_fields(self, repo):
+        await _seed_work_item(
+            repo,
+            autonomy_level="autonomous_development",
+            ledger_policy="strict",
+            ledger_path="karkhana-runs/run-001.md",
+            verification_commands=["graphify update ."],
+        )
+        svc = ProjectTwinService()
+        result = await svc.claim_job(
+            worker_id="worker-001",
+            capabilities=_full_capabilities(),
+        )
+        assert result is not None
+        job_id = result["job"]["id"]
+        claim_token = result["job"]["claim_token"]
+
+        await svc.complete_job(
+            job_id=job_id,
+            claim_token=claim_token,
+            worker_id="worker-001",
+            result={
+                "summary": "Done",
+                "tests_passed": True,
+                "graphify_updated": True,
+                "verification_results": [
+                    {"command": "graphify update .", "status": "passed"},
+                ],
                 "ledger_updated": True,
                 "ledger_sections_updated": ["Codex runs", "Risks"],
             },
@@ -358,7 +539,14 @@ class TestGraphifyCompletionSuccess:
             job_id=job_id,
             claim_token=claim_token,
             worker_id="worker-001",
-            result={"summary": "Done", "tests_passed": True, "graphify_updated": True},
+            result={
+                "summary": "Done",
+                "tests_passed": True,
+                "graphify_updated": True,
+                "verification_results": [
+                    {"command": "graphify update .", "status": "passed"},
+                ],
+            },
         )
         completed = await repo.get_work_item(job_id)
         assert completed is not None
@@ -387,3 +575,206 @@ class TestGraphifyCompletionSuccess:
         completed = await repo.get_work_item(job_id)
         assert completed is not None
         assert completed.status == "completed"
+
+
+class TestDraftPullRequestCompletion:
+    @pytest.mark.asyncio
+    async def test_high_autonomy_completion_creates_draft_pull_request(self, repo, monkeypatch):
+        await _seed_work_item(
+            repo,
+            autonomy_level="autonomous_development",
+            verification_commands=["graphify update ."],
+        )
+        fake_service = _FakeGitHubAppService(
+            response={
+                "html_url": "https://github.com/acme/app/pull/42",
+                "url": "https://api.github.com/repos/acme/app/pulls/42",
+                "number": 42,
+                "state": "open",
+                "draft": True,
+            }
+        )
+        monkeypatch.setattr(project_twin_module, "GitHubAppService", lambda: fake_service)
+
+        svc = ProjectTwinService()
+        claim = await svc.claim_job(
+            worker_id="worker-001",
+            capabilities=_full_capabilities(),
+        )
+        assert claim is not None
+        job_id = claim["job"]["id"]
+        claim_token = claim["job"]["claim_token"]
+
+        completed = await svc.complete_job(
+            job_id=job_id,
+            claim_token=claim_token,
+            worker_id="worker-001",
+            result={
+                "summary": "Done",
+                "tests_passed": True,
+                "graphify_updated": True,
+                "verification_results": [
+                    {"command": "graphify update .", "status": "passed"},
+                ],
+                "commit_sha": "abc123",
+                "commit_message": "Ship the fix",
+                "branch_name": "feature/job-1",
+            },
+        )
+
+        assert completed["status"] == "completed"
+        draft_pr = completed["result"]["draft_pr"]
+        assert draft_pr["html_url"] == "https://github.com/acme/app/pull/42"
+        assert draft_pr["head_branch"] == "feature/job-1"
+        assert draft_pr["base_branch"] == "main"
+        assert draft_pr["title"] == "Ship the fix"
+        assert "Human approval required before merge." in draft_pr["body"]
+        assert "Verification summary:" in draft_pr["body"]
+        assert "Graphify status:" in draft_pr["body"]
+        assert "Logs note:" in draft_pr["body"]
+        assert fake_service.calls == [
+            {
+                "installation_id": "inst-1",
+                "owner": "acme",
+                "repo_name": "app",
+                "title": "Ship the fix",
+                "head_branch": "feature/job-1",
+                "base_branch": "main",
+                "body": draft_pr["body"],
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_draft_pull_request_failure_marks_job_terminal(self, repo, monkeypatch):
+        await _seed_work_item(
+            repo,
+            autonomy_level="autonomous_development",
+            verification_commands=["graphify update ."],
+        )
+        fake_service = _FakeGitHubAppService(error=RuntimeError("boom"))
+        monkeypatch.setattr(project_twin_module, "GitHubAppService", lambda: fake_service)
+
+        svc = ProjectTwinService()
+        claim = await svc.claim_job(
+            worker_id="worker-002",
+            capabilities=_full_capabilities(),
+        )
+        assert claim is not None
+        job_id = claim["job"]["id"]
+        claim_token = claim["job"]["claim_token"]
+
+        completed = await svc.complete_job(
+            job_id=job_id,
+            claim_token=claim_token,
+            worker_id="worker-002",
+            result={
+                "summary": "Done",
+                "tests_passed": True,
+                "graphify_updated": True,
+                "verification_results": [
+                    {"command": "graphify update .", "status": "passed"},
+                ],
+                "commit_sha": "abc123",
+                "commit_message": "Ship the fix",
+                "branch_name": "feature/job-2",
+            },
+        )
+
+        assert completed["status"] == "failed_terminal"
+        assert "Draft pull request creation failed: boom" in (completed["error"] or "")
+        stored = await repo.get_work_item(job_id)
+        assert stored is not None
+        assert stored.status == "failed_terminal"
+        assert "Draft pull request creation failed: boom" in (stored.error or "")
+        assert await repo.list_project_commits(stored.idea_id) == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("autonomy_level,job_type", [
+        ("suggest_only", "agent_branch_work"),
+        ("autonomous_development", "repo_index"),
+    ])
+    async def test_suggest_only_and_repo_index_skip_draft_pull_request(
+        self,
+        repo,
+        monkeypatch,
+        autonomy_level,
+        job_type,
+    ):
+        await _seed_work_item(
+            repo,
+            autonomy_level=autonomy_level,
+            job_type=job_type,
+            verification_commands=["graphify update ."],
+        )
+        fake_service = _FakeGitHubAppService(
+            response={
+                "html_url": "https://github.com/acme/app/pull/42",
+                "url": "https://api.github.com/repos/acme/app/pulls/42",
+                "number": 42,
+                "state": "open",
+                "draft": True,
+            }
+        )
+        monkeypatch.setattr(project_twin_module, "GitHubAppService", lambda: fake_service)
+
+        svc = ProjectTwinService()
+        claim = await svc.claim_job(
+            worker_id="worker-003",
+            capabilities=_full_capabilities(),
+        )
+        assert claim is not None
+        job_id = claim["job"]["id"]
+        claim_token = claim["job"]["claim_token"]
+
+        completed = await svc.complete_job(
+            job_id=job_id,
+            claim_token=claim_token,
+            worker_id="worker-003",
+            result={
+                "summary": "Done",
+                "tests_passed": True,
+                "graphify_updated": True,
+                "verification_results": [
+                    {"command": "graphify update .", "status": "passed"},
+                ],
+                "commit_sha": "abc123",
+                "branch_name": "feature/job-3",
+            },
+        )
+
+        assert completed["status"] == "completed"
+        assert "draft_pr" not in (completed["result"] or {})
+        assert fake_service.calls == []
+
+
+class _FakeGitHubAppService:
+    def __init__(self, *, response: dict | None = None, error: Exception | None = None) -> None:
+        self.response = response or {}
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    async def create_draft_pull_request(
+        self,
+        *,
+        installation_id: str,
+        owner: str,
+        repo_name: str,
+        title: str,
+        head_branch: str,
+        base_branch: str,
+        body: str = "",
+    ) -> dict[str, object]:
+        self.calls.append(
+            {
+                "installation_id": installation_id,
+                "owner": owner,
+                "repo_name": repo_name,
+                "title": title,
+                "head_branch": head_branch,
+                "base_branch": base_branch,
+                "body": body,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        return self.response

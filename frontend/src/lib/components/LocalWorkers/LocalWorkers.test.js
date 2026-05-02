@@ -221,7 +221,7 @@ describe('LocalWorkers', () => {
   it('purges revoked workers', async () => {
     render(LocalWorkers);
 
-    const purgeButton = await screen.findByRole('button', { name: /purge revoked/i });
+    const purgeButton = await screen.findByRole('button', { name: /reset revocations/i });
     await fireEvent.click(purgeButton);
 
     await waitFor(() => {

@@ -256,6 +256,9 @@
       <p>Generate invite links for your workers, approve pending requests, and manage connected machines.</p>
     </div>
     <div class="hero-actions">
+      <Button variant="danger" onclick={purgeRevoked} disabled={!hasRevokedWorkers || isActing === 'purge-revoked'}>
+        {#if isActing === 'purge-revoked'}<span class="spin"><Loader2 size={16} /></span> Resetting{:else}<ShieldOff size={16} /> Reset Revocations{/if}
+      </Button>
       <Button onclick={loadWorkers} disabled={isLoading}>
         {#if isLoading}<span class="spin"><Loader2 size={16} /></span> Loading{:else}<RefreshCw size={16} /> Refresh{/if}
       </Button>
@@ -344,12 +347,7 @@
     <section class="panel">
       <header>
         <h2><ServerCog size={18} /> Connected Workers</h2>
-        <div class="header-actions">
-          <Button size="sm" variant="danger" onclick={purgeRevoked} disabled={!hasRevokedWorkers || isActing === 'purge-revoked'}>
-            {#if isActing === 'purge-revoked'}<span class="spin"><Loader2 size={14} /></span> Purging{:else}<ShieldOff size={14} /> Purge Revoked{/if}
-          </Button>
-          <Badge variant="primary">{state.workers.length}</Badge>
-        </div>
+        <Badge variant="primary">{state.workers.length}</Badge>
       </header>
       {#if state.workers.length}
         <div class="row-list">
@@ -504,7 +502,7 @@
   .hero { margin-bottom: var(--spacing-lg); }
   .hero h1 { color: var(--color-text); font-size: 2.2rem; line-height: 1; margin: var(--spacing-xs) 0; }
   .hero p, .panel p, .panel small, .request-row span, .worker-row span { color: var(--color-text-secondary); }
-  .hero-actions, .row-actions, .header-actions { align-items: center; display: flex; flex-wrap: wrap; gap: var(--spacing-sm); }
+  .hero-actions, .row-actions { align-items: center; display: flex; flex-wrap: wrap; gap: var(--spacing-sm); }
   .status-grid, .workspace { display: grid; gap: var(--spacing-md); margin-bottom: var(--spacing-lg); }
   .status-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .workspace { grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); }

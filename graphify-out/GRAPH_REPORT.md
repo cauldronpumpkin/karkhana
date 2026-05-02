@@ -1,7 +1,7 @@
 # Graph Report - .  (2026-05-02)
 
 ## Corpus Check
-- 254 files · ~205,248 words
+- 254 files · ~205,243 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -844,11 +844,11 @@ Nodes (1): Return formatted memory text for inclusion in LLM system prompts.
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `InMemoryRepository` connect `Community 1` to `Community 0`, `Community 3`, `Community 4`, `Community 5`, `Community 6`, `Community 7`, `Community 9`, `Community 10`, `Community 13`?**
-  _High betweenness centrality (0.099) - this node is a cross-community bridge._
+  _High betweenness centrality (0.100) - this node is a cross-community bridge._
 - **Why does `Repository` connect `Community 10` to `Community 9`, `Community 1`?**
-  _High betweenness centrality (0.080) - this node is a cross-community bridge._
-- **Why does `DynamoDBRepository` connect `Community 1` to `Community 0`, `Community 4`, `Community 5`, `Community 6`, `Community 7`, `Community 9`, `Community 10`?**
-  _High betweenness centrality (0.051) - this node is a cross-community bridge._
+  _High betweenness centrality (0.070) - this node is a cross-community bridge._
+- **Why does `FileManager` connect `Community 0` to `Community 9`, `Community 4`?**
+  _High betweenness centrality (0.055) - this node is a cross-community bridge._
 - **Are the 148 inferred relationships involving `FileManager` (e.g. with `BuildHandoffService` and `Generate a memory key for build tracking.`) actually correct?**
   _`FileManager` has 148 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 57 inferred relationships involving `InMemoryRepository` (e.g. with `MockLLMService` and `FakeSession`) actually correct?**

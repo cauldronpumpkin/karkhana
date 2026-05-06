@@ -66,7 +66,10 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFBOTZEQjRERjFBQjY1RjgKUldUWXBLcG5XRUJ5Z1l0dG1NT2ZKQW9mMnZ3eUZlN2NJUW1XcFVHV1JRSjRqR2dYS3lNdE5IZUEK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFBOTZEQjRERjFBQjY1RjgKUldUWXBLcG5XRUJ5Z1l0dG1NT2ZKQW9mMnZ3eUZlN2NJUW1XcFVHV1JRSjRqR2dYS3lNdE5IZUEK",
+      "endpoints": [
+        "https://github.com/cauldronpumpkin/karkhana/releases/latest/download/latest.json"
+      ]
     }
   }
 }

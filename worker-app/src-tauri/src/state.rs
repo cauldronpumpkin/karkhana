@@ -1,7 +1,9 @@
 use crate::types::WorkerState;
+use serde::{Deserialize, Serialize};
 use serde_json;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock, RwLock};
 
 const WORKER_DIR: &str = "idearefinery-worker";
 const LEGACY_WORKER_DIR: &str = "openclaude-local";
@@ -91,5 +93,108 @@ impl StateStore {
 impl Default for StateStore {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ── AppHealth ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppHealth {
+    pub api_connected: bool,
+    pub sqs_messages_waiting: u64,
+    pub opencode_session_count: u32,
+    pub last_successful_job: Option<String>,
+    pub error_count_last_hour: u32,
+}
+
+impl Default for AppHealth {
+    fn default() -> Self {
+        AppHealth {
+            api_connected: false,
+            sqs_messages_waiting: 0,
+            opencode_session_count: 0,
+            last_successful_job: None,
+            error_count_last_hour: 0,
+        }
+    }
+}
+
+/// Thread-safe global health tracker.
+static GLOBAL_HEALTH: OnceLock<Arc<RwLock<AppHealth>>> = OnceLock::new();
+
+fn global_health() -> &'static Arc<RwLock<AppHealth>> {
+    GLOBAL_HEALTH.get_or_init(|| Arc::new(RwLock::new(AppHealth::default())))
+}
+
+#[tauri::command]
+pub fn get_app_health() -> Result<AppHealth, String> {
+    global_health()
+        .read()
+        .map(|h| h.clone())
+        .map_err(|e| format!("Failed to read app health: {}", e))
+}
+
+/// Update a single field of the global AppHealth by name.
+/// Supported fields: `api_connected` (bool), `sqs_messages_waiting` (u64),
+/// `opencode_session_count` (u32), `last_successful_job` (String),
+/// `error_count_last_hour` (u32).
+pub fn update_app_health(field: &str, value: serde_json::Value) -> Result<(), String> {
+    let mut health = global_health()
+        .write()
+        .map_err(|e| format!("Failed to write app health: {}", e))?;
+    match field {
+        "api_connected" => {
+            health.api_connected = value.as_bool().unwrap_or(false);
+        }
+        "sqs_messages_waiting" => {
+            health.sqs_messages_waiting = value.as_u64().unwrap_or(0);
+        }
+        "opencode_session_count" => {
+            health.opencode_session_count = value.as_u64().unwrap_or(0) as u32;
+        }
+        "last_successful_job" => {
+            health.last_successful_job = value.as_str().map(|s| s.to_string());
+        }
+        "error_count_last_hour" => {
+            health.error_count_last_hour = value.as_u64().unwrap_or(0) as u32;
+        }
+        _ => return Err(format!("Unknown health field: {}", field)),
+    }
+    Ok(())
+}
+
+/// Convenience: mark API connectivity status.
+pub fn set_api_connected(connected: bool) {
+    if let Ok(mut h) = global_health().write() {
+        h.api_connected = connected;
+    }
+}
+
+/// Convenience: increment error count (auto‑trims on read, caller can
+/// call `decay_errors()` periodically).
+pub fn increment_error_count() {
+    if let Ok(mut h) = global_health().write() {
+        h.error_count_last_hour = h.error_count_last_hour.saturating_add(1);
+    }
+}
+
+/// Convenience: record a successful job timestamp.
+pub fn record_successful_job(timestamp: &str) {
+    if let Ok(mut h) = global_health().write() {
+        h.last_successful_job = Some(timestamp.to_string());
+    }
+}
+
+/// Convenience: set SQS messages waiting.
+pub fn set_sqs_messages_waiting(count: u64) {
+    if let Ok(mut h) = global_health().write() {
+        h.sqs_messages_waiting = count;
+    }
+}
+
+/// Convenience: set opencode session count.
+pub fn set_opencode_session_count(count: u32) {
+    if let Ok(mut h) = global_health().write() {
+        h.opencode_session_count = count;
     }
 }

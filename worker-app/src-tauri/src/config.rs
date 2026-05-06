@@ -38,9 +38,27 @@ fn write_config_value(path: &Path, value: &serde_json::Value) -> Result<(), Stri
 }
 
 pub fn load_config_from_dir(base_dir: impl AsRef<Path>) -> WorkerConfig {
+    let value = load_config_value_from_dir(base_dir);
+    serde_json::from_value(value).unwrap_or_else(|_| WorkerConfig::default())
+}
+
+/// Load the raw config JSON value (for module-level state injection like
+/// canary mode / revocation).
+pub fn load_config_as_value() -> Result<serde_json::Value, String> {
+    Ok(load_config_value_from_dir(
+        dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")),
+    ))
+}
+
+/// Persist a raw JSON value back to the config file.
+pub fn save_config_value(value: &serde_json::Value) -> Result<(), String> {
+    let path = config_path();
+    write_config_value(&path, value)
+}
+
+fn load_config_value_from_dir(base_dir: impl AsRef<Path>) -> serde_json::Value {
     let current_path = config_path_in(base_dir.as_ref());
     let legacy_paths = legacy_config_paths_in(base_dir);
-
     let current_value = read_config_value(&current_path);
     let legacy_value = if current_value.is_none() {
         legacy_paths.iter().find_map(|path| read_config_value(path))
@@ -78,11 +96,18 @@ pub fn load_config_from_dir(base_dir: impl AsRef<Path>) -> WorkerConfig {
         );
     }
 
-    serde_json::from_value(data).unwrap_or_else(|_| WorkerConfig::default())
+    data
 }
 
 pub fn load_config() -> WorkerConfig {
-    load_config_from_dir(dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")))
+    let config = load_config_from_dir(dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")));
+
+    // Restore in-memory revocation flag from persisted config
+    if config.revoked {
+        crate::worker::restore_revoked(config.revoked_reason.clone());
+    }
+
+    config
 }
 
 pub fn save_config(config: &WorkerConfig) -> Result<(), String> {
@@ -123,6 +148,8 @@ impl Default for WorkerConfig {
             opencode_server_url: Some("http://127.0.0.1:4096".to_string()),
             litellm_port: Some(4000),
             litellm_config: None,
+            revoked: false,
+            revoked_reason: None,
         }
     }
 }

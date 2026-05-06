@@ -2,6 +2,7 @@
   import { invoke } from '@tauri-apps/api/core'
   import { listen } from '@tauri-apps/api/event'
   import { onMount } from 'svelte'
+  import ErrorBoundary from './lib/components/ErrorBoundary.svelte'
   import StatusPanel from './lib/components/Dashboard/StatusPanel.svelte'
   import JobHistory from './lib/components/Dashboard/JobHistory.svelte'
   import LiveLogs from './lib/components/Dashboard/LiveLogs.svelte'
@@ -80,17 +81,19 @@
   </nav>
 
   <main class="app-main">
-    {#if activeTab === 'status'}
-      <StatusPanel />
-    {:else if activeTab === 'jobs'}
-      <JobHistory />
-    {:else if activeTab === 'logs'}
-      <LiveLogs />
-    {:else if activeTab === 'pairing'}
-      <PairingFlow />
-    {:else if activeTab === 'config'}
-      <ConfigEditor />
-    {/if}
+    <ErrorBoundary>
+      {#if activeTab === 'status'}
+        <StatusPanel />
+      {:else if activeTab === 'jobs'}
+        <JobHistory />
+      {:else if activeTab === 'logs'}
+        <LiveLogs />
+      {:else if activeTab === 'pairing'}
+        <PairingFlow />
+      {:else if activeTab === 'config'}
+        <ConfigEditor />
+      {/if}
+    </ErrorBoundary>
   </main>
 </div>
 

@@ -1,0 +1,6 @@
+model:
+  default: deepseek-v4-pro
+  provider: deepseek
+  base_url: https://api.deepseek.com/v1
+  api_key: ${DEEPSEEK_API_KEY}
+fallback_providers: '[{"provider": "codex-lb", "model": "gpt-5.5"}]'

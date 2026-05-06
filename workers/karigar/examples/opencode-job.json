@@ -1,0 +1,25 @@
+{
+  "job_id": "opencode-demo-001",
+  "repository_path": ".",
+  "task_title": "Fix login bug in auth module",
+  "task_prompt": "Find and fix the authentication bug in the login flow. The bug causes 500 errors when users submit invalid credentials instead of returning 401.",
+  "branch_name": "karigar/fix-login-bug",
+  "engine_name": "opencode",
+  "engine_config": {
+    "agent": "build"
+  },
+  "verification_commands": [
+    "python -m pytest tests/test_auth.py -v",
+    "python -m ruff check backend/auth.py"
+  ],
+  "allowed_paths": [
+    "backend/auth.py",
+    "backend/auth_utils.py",
+    "tests/test_auth.py"
+  ],
+  "step_timeout_seconds": 1200,
+  "metadata": {
+    "priority": "high",
+    "requested_by": "karigar-demo"
+  }
+}

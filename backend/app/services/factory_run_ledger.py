@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import os
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 
 REQUIRED_FRONTMATTER_FIELDS = frozenset({
@@ -153,106 +156,16 @@ def _escape_table_cell(value: str) -> str:
 
 
 def _parse_simple_yaml(text: str) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    lines = text.splitlines()
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            i += 1
-            continue
-
-        match = re.match(r"^(\w+)\s*:\s*(.*)", stripped)
-        if not match:
-            i += 1
-            continue
-
-        key = match.group(1)
-        value_part = match.group(2).strip()
-
-        if value_part == "" or value_part.startswith("#"):
-            block_items: list[str] = []
-            i += 1
-            while i < len(lines):
-                block_line = lines[i]
-                if block_line.startswith("  ") or block_line.startswith("- "):
-                    block_stripped = block_line.strip()
-                    if block_stripped.startswith("- "):
-                        item = block_stripped[2:].strip()
-                        q = _parse_scalar(item)
-                        block_items.append(str(q) if not isinstance(q, bool) else str(q).lower())
-                    elif block_line.startswith("  ") and block_items:
-                        pass
-                    else:
-                        break
-                else:
-                    break
-                i += 1
-
-            if len(block_items) == 1 and ":" in block_items[0]:
-                sub_match = re.match(r"^(\w+)\s*:\s*(.*)", block_items[0])
-                if sub_match:
-                    sub_key = sub_match.group(1)
-                    sub_val = _parse_scalar(sub_match.group(2).strip())
-                    result[key] = {sub_key: sub_val}
-                elif block_items:
-                    result[key] = block_items
-                else:
-                    result[key] = ""
-            elif block_items:
-                result[key] = block_items
-            else:
-                result[key] = ""
-            continue
-
-        if value_part.startswith("["):
-            inner = value_part[1:]
-            if inner.endswith("]"):
-                inner = inner[:-1]
-            items = [x.strip().strip("\"'") for x in inner.split(",") if x.strip()]
-            result[key] = items
-        else:
-            result[key] = _parse_scalar(value_part)
-
-        i += 1
+    result = yaml.safe_load(text)
+    if result is None:
+        return {}
+    if not isinstance(result, dict):
+        raise FactoryRunLedgerError("YAML frontmatter must be a mapping")
     return result
 
 
-def _parse_scalar(value: str) -> Any:
-    if value.lower() == "true":
-        return True
-    if value.lower() == "false":
-        return False
-    if value.startswith('"') and value.endswith('"'):
-        return value[1:-1]
-    if value.startswith("'") and value.endswith("'"):
-        return value[1:-1]
-    return value
-
-
 def _format_frontmatter(metadata: dict[str, Any]) -> str:
-    lines: list[str] = ["---"]
-    for key, value in metadata.items():
-        if isinstance(value, list):
-            if not value:
-                lines.append(f"{key}: []")
-            else:
-                lines.append(f"{key}:")
-                for item in value:
-                    lines.append(f"  - {item}")
-        elif isinstance(value, dict):
-            lines.append(f"{key}:")
-            for sub_key, sub_value in value.items():
-                lines.append(f"  {sub_key}: {sub_value}")
-        elif isinstance(value, bool):
-            lines.append(f"{key}: {str(value).lower()}")
-        elif isinstance(value, str):
-            lines.append(f'{key}: "{value}"')
-        else:
-            lines.append(f"{key}: {value}")
-    lines.append("---")
-    return "\n".join(lines) + "\n"
+    return "---\n" + yaml.dump(metadata, default_flow_style=False, sort_keys=False) + "---\n"
 
 
 def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
@@ -277,6 +190,17 @@ def _validate_required(metadata: dict[str, Any]) -> None:
         raise FactoryRunLedgerError(
             f"Missing required frontmatter field(s): {', '.join(sorted(missing))}"
         )
+    # Strict type validation for required fields
+    for field in ("run_id", "title", "status", "stage", "created_at", "updated_at"):
+        value = metadata.get(field)
+        if not isinstance(value, str):
+            raise FactoryRunLedgerError(
+                f"Required frontmatter field '{field}' must be a string, got {type(value).__name__}"
+            )
+        if not value.strip():
+            raise FactoryRunLedgerError(
+                f"Required frontmatter field '{field}' must not be empty"
+            )
 
 
 def _touch_updated_at(metadata: dict[str, Any]) -> dict[str, Any]:
@@ -520,3 +444,153 @@ class FactoryRunLedgerService:
         _validate_required(metadata)
         body = _append_bullet(body, "Reusable lessons", lesson)
         _write_ledger(path, metadata, body)
+
+
+# ---------------------------------------------------------------------------
+# DynamoDB Ledger Entity
+# ---------------------------------------------------------------------------
+
+class DynamoDBLedgerService:
+    """Stores ledger metadata in DynamoDB. Markdown body is stored in S3."""
+
+    def __init__(
+        self,
+        table_name: str | None = None,
+        region_name: str = "us-east-1",
+    ) -> None:
+        import boto3
+
+        self.table_name = table_name or os.environ.get("DYNAMODB_TABLE_NAME", "IdeaRefinery")
+        self.table = boto3.resource("dynamodb", region_name=region_name).Table(self.table_name)
+        self._region = region_name
+
+    def _ledger_id(self) -> str:
+        return uuid.uuid4().hex[:12]
+
+    def _clean_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in item.items() if v is not None}
+
+    def create_ledger_record(
+        self,
+        run_id: str,
+        title: str,
+        status: str = "active",
+        stage: str = "planning",
+        s3_key: str = "",
+    ) -> str:
+        ledger_id = self._ledger_id()
+        now = _utcnow_iso()
+        item = self._clean_item({
+            "PK": f"LEDGER#{ledger_id}",
+            "SK": "METADATA",
+            "entity": "FactoryRunLedger",
+            "ledger_id": ledger_id,
+            "run_id": run_id,
+            "GSI1PK": f"RUN#{run_id}",
+            "GSI1SK": f"LEDGER#{now}#{ledger_id}",
+            "title": title,
+            "status": status,
+            "stage": stage,
+            "created_at": now,
+            "updated_at": now,
+            "s3_key": s3_key,
+        })
+        self.table.put_item(Item=item)
+        return ledger_id
+
+    def get_ledger_record(self, ledger_id: str) -> dict[str, Any]:
+        response = self.table.get_item(Key={"PK": f"LEDGER#{ledger_id}", "SK": "METADATA"})
+        item = response.get("Item")
+        if not item:
+            raise FactoryRunLedgerError(f"Ledger record not found: {ledger_id}")
+        return dict(item)
+
+    def list_ledgers_for_run(self, run_id: str) -> list[dict[str, Any]]:
+        from boto3.dynamodb.conditions import Key
+
+        items: list[dict[str, Any]] = []
+        kwargs: dict[str, Any] = {
+            "IndexName": "GSI1",
+            "KeyConditionExpression": Key("GSI1PK").eq(f"RUN#{run_id}") & Key("GSI1SK").begins_with("LEDGER#"),
+        }
+        while True:
+            response = self.table.query(**kwargs)
+            items.extend(response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            kwargs["ExclusiveStartKey"] = last_key
+        return items
+
+    def update_ledger_record(self, ledger_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+        record = self.get_ledger_record(ledger_id)
+        allowed = {"title", "status", "stage", "s3_key"}
+        update_expr_parts: list[str] = []
+        expr_names: dict[str, str] = {}
+        expr_values: dict[str, Any] = {}
+        for key, value in updates.items():
+            if key not in allowed:
+                continue
+            name_placeholder = f"#{key}"
+            value_placeholder = f":{key}"
+            update_expr_parts.append(f"{name_placeholder} = {value_placeholder}")
+            expr_names[name_placeholder] = key
+            expr_values[value_placeholder] = value
+
+        if not update_expr_parts:
+            return record
+
+        update_expr_parts.append("#updated_at = :updated_at")
+        expr_names["#updated_at"] = "updated_at"
+        expr_values[":updated_at"] = _utcnow_iso()
+
+        self.table.update_item(
+            Key={"PK": f"LEDGER#{ledger_id}", "SK": "METADATA"},
+            UpdateExpression="SET " + ", ".join(update_expr_parts),
+            ExpressionAttributeNames=expr_names,
+            ExpressionAttributeValues=expr_values,
+        )
+        return self.get_ledger_record(ledger_id)
+
+
+# ---------------------------------------------------------------------------
+# S3 Storage
+# ---------------------------------------------------------------------------
+
+_LEDGER_S3_BUCKET: str | None = None
+
+
+def _get_ledger_s3_bucket() -> str:
+    global _LEDGER_S3_BUCKET
+    if _LEDGER_S3_BUCKET is None:
+        _LEDGER_S3_BUCKET = os.environ.get(
+            "IDEAREFINERY_S3_BUCKET", os.environ.get("S3_BUCKET", "idea-refinery-storage")
+        )
+    return _LEDGER_S3_BUCKET
+
+
+def _get_s3_client():
+    import boto3
+
+    return boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+
+
+def store_ledger_body(ledger_id: str, run_id: str, body_text: str) -> str:
+    """Upload ledger markdown body to S3. Returns the S3 key."""
+    bucket = _get_ledger_s3_bucket()
+    s3_key = f"ledgers/{run_id}/{ledger_id}.md"
+    _get_s3_client().put_object(
+        Bucket=bucket,
+        Key=s3_key,
+        Body=body_text.encode("utf-8"),
+        ContentType="text/markdown; charset=utf-8",
+    )
+    return s3_key
+
+
+def get_ledger_body(ledger_id: str, run_id: str) -> str:
+    """Download ledger markdown body from S3."""
+    bucket = _get_ledger_s3_bucket()
+    s3_key = f"ledgers/{run_id}/{ledger_id}.md"
+    response = _get_s3_client().get_object(Bucket=bucket, Key=s3_key)
+    return response["Body"].read().decode("utf-8")

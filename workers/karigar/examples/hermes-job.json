@@ -1,0 +1,20 @@
+{
+  "job_id": "hermes-demo-001",
+  "repository_path": ".",
+  "task_title": "Add rate limiting to API endpoints",
+  "task_prompt": "Implement rate limiting middleware for the FastAPI backend. Add a token bucket algorithm with configurable rate limits per endpoint. Include tests.",
+  "branch_name": "karigar/add-rate-limiting",
+  "engine_name": "hermes",
+  "engine_config": {
+    "model": "deepseek-v4-pro"
+  },
+  "verification_commands": [
+    "python -m pytest tests/test_rate_limit.py -v",
+    "python -m ruff check backend/"
+  ],
+  "step_timeout_seconds": 1800,
+  "metadata": {
+    "priority": "medium",
+    "hermes_model": "deepseek-v4-pro"
+  }
+}

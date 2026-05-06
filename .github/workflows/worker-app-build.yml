@@ -1,0 +1,98 @@
+name: Worker app build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-build:
+    name: Windows Tauri build
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: worker-app/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: worker-app/src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: worker-app
+
+      - name: Build web assets
+        run: npm run build
+        working-directory: worker-app
+
+      - name: Build Tauri Rust crate
+        run: cargo build --locked
+        working-directory: worker-app/src-tauri
+
+      - name: Upload Windows binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-app-windows-debug
+          path: worker-app/src-tauri/target/debug/*.exe
+          if-no-files-found: error
+
+  macos-build:
+    name: macOS Tauri build
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: worker-app/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: worker-app/src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: worker-app
+
+      - name: Build web assets
+        run: npm run build
+        working-directory: worker-app
+
+      - name: Build Tauri Rust crate
+        run: cargo build --locked
+        working-directory: worker-app/src-tauri
+
+      - name: Upload macOS binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-app-macos-debug
+          path: worker-app/src-tauri/target/debug/idearefinery-worker
+          if-no-files-found: error

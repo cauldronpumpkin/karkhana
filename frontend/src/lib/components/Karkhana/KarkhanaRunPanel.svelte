@@ -2,6 +2,8 @@
   import { onMount } from 'svelte';
   import {
     AlertTriangle,
+    ArrowLeft,
+    BookOpen,
     CheckCircle2,
     ChevronDown,
     ChevronRight,
@@ -20,6 +22,9 @@
   import Badge from '../UI/Badge.svelte';
   import Button from '../UI/Button.svelte';
   import PromptInspector from './PromptInspector.svelte';
+  import LedgerList from '../Ledger/LedgerList.svelte';
+  import LedgerDetail from '../Ledger/LedgerDetail.svelte';
+  import LedgerTimeline from '../Ledger/LedgerTimeline.svelte';
 
   let { factoryRunId = '', autonomyLevel = 'autonomous_development' } = $props();
 
@@ -89,6 +94,14 @@
 
   let isSuggestOnly = $derived(autonomyLevel === 'suggest_only');
   let isFullAutopilot = $derived(autonomyLevel === 'full_autopilot');
+
+  let activeTab = $state('run');
+  let selectedLedgerId = $state(null);
+
+  const tabOptions = [
+    { key: 'run', label: 'Run Details' },
+    { key: 'ledger', label: 'Ledger' },
+  ];
 
   const roleLabels = {
     planner: 'Planner',
@@ -299,6 +312,14 @@
     return value === null || value === undefined || value === '' ? 'n/a' : String(value);
   }
 
+  function handleBack() {
+    selectedLedgerId = null;
+  }
+
+  function handleSelectLedger(ledgerId) {
+    selectedLedgerId = ledgerId;
+  }
+
   onMount(loadRun);
 </script>
 
@@ -342,6 +363,39 @@
         </Button>
       </div>
     </header>
+
+    <nav class="tab-bar" aria-label="View tabs">
+      {#each tabOptions as tab}
+        <button
+          class="tab-btn"
+          class:active={activeTab === tab.key}
+          onclick={() => activeTab = tab.key}
+        >
+          {#if tab.key === 'ledger'}<BookOpen size={14} />{/if}
+          {tab.label}
+        </button>
+      {/each}
+    </nav>
+
+    {#if activeTab === 'ledger'}
+      <!-- Ledger View -->
+      {#if selectedLedgerId}
+        <LedgerDetail
+          runId={factoryRunId}
+          ledgerId={selectedLedgerId}
+          onBack={handleBack}
+        />
+      {:else}
+        <div class="ledger-sections">
+          <LedgerTimeline runId={factoryRunId} />
+          <LedgerList
+            runId={factoryRunId}
+            onSelectLedger={handleSelectLedger}
+          />
+        </div>
+      {/if}
+    {:else}
+    <!-- Run Details (existing content) -->
 
     {#if isFullAutopilot}
       <section class="guardrail-banner">
@@ -653,6 +707,7 @@
         <div class="empty-text">No phases created yet. The run may still be initializing.</div>
       {/if}
     </section>
+  {/if}
   {:else}
     <section class="panel loading">
       <span>No factory run selected.</span>
@@ -737,6 +792,43 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .tab-bar {
+    display: flex;
+    gap: 0;
+    margin-bottom: var(--spacing-lg);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .tab-btn {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    font-size: 0.88rem;
+    gap: 6px;
+    padding: 10px 18px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .tab-btn:hover {
+    color: var(--color-text);
+  }
+
+  .tab-btn.active {
+    border-bottom-color: var(--color-accent);
+    color: var(--color-text);
+    font-weight: 600;
+  }
+
+  .ledger-sections {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg);
   }
 
   .guardrail-banner {

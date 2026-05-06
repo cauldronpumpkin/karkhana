@@ -1,9 +1,119 @@
 use crate::opencode_session::OpenCodeClient;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+
+/// Global canary-mode state for the worker process.
+static CANARY_MODE: AtomicBool = AtomicBool::new(false);
+static CONSECUTIVE_FAILURES_GLOBAL: AtomicU32 = AtomicU32::new(0);
+const CANARY_THRESHOLD: u32 = 5;
+
+/// Enter canary mode when consecutive failures exceed threshold.
+pub fn enter_canary_mode() -> bool {
+    let prev = CANARY_MODE.swap(true, Ordering::SeqCst);
+    log_canary_state(true);
+    !prev // returns true if this call actually toggled canary on
+}
+
+/// Exit canary mode and reset the failure counter.
+pub fn exit_canary_mode() {
+    CONSECUTIVE_FAILURES_GLOBAL.store(0, Ordering::SeqCst);
+    CANARY_MODE.store(false, Ordering::SeqCst);
+    log_canary_state(false);
+}
+
+/// Returns true if the worker is currently in canary mode.
+pub fn is_canary() -> bool {
+    CANARY_MODE.load(Ordering::SeqCst)
+}
+
+/// Returns an optional warning message when in canary mode.
+pub fn canary_warning() -> Option<String> {
+    if is_canary() {
+        let failures = CONSECUTIVE_FAILURES_GLOBAL.load(Ordering::SeqCst);
+        Some(format!(
+            "CANARY MODE: {} consecutive failures (threshold {}) — worker is degraded. \
+             No new jobs will be claimed until the failure count resets.",
+            failures, CANARY_THRESHOLD
+        ))
+    } else {
+        None
+    }
+}
+
+/// Increment the global failure counter.  If it crosses the threshold the
+/// worker enters canary mode automatically.
+pub fn record_failure() {
+    let count = CONSECUTIVE_FAILURES_GLOBAL.fetch_add(1, Ordering::SeqCst) + 1;
+    if count >= CANARY_THRESHOLD && !CANARY_MODE.load(Ordering::SeqCst) {
+        enter_canary_mode();
+    }
+}
+
+/// Reset the global failure counter (e.g. after a successful job).
+pub fn reset_failures() {
+    CONSECUTIVE_FAILURES_GLOBAL.store(0, Ordering::SeqCst);
+}
+
+/// Returns the current consecutive failure count.
+pub fn failure_count() -> u32 {
+    CONSECUTIVE_FAILURES_GLOBAL.load(Ordering::SeqCst)
+}
+
+/// Persist canary state to the worker config file on disk.
+fn log_canary_state(canary: bool) {
+    if let Ok(mut config) = crate::config::load_config_as_value() {
+        if let Some(obj) = config.as_object_mut() {
+            obj.insert(
+                "canary_mode".to_string(),
+                serde_json::Value::Bool(canary),
+            );
+            obj.insert(
+                "canary_since".to_string(),
+                serde_json::Value::String(chrono_now()),
+            );
+        }
+        let _ = crate::config::save_config_value(&config);
+    }
+}
+
+/// Quick ISO-8601 timestamp helper (no extra crate needed).
+fn chrono_now() -> String {
+    use std::time::SystemTime;
+    let dur = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = dur.as_secs();
+    // Simple UTC ISO rendering
+    let days = secs / 86400;
+    let time = secs % 86400;
+    let hours = time / 3600;
+    let mins = (time % 3600) / 60;
+    let secs = time % 60;
+    // Compute year/month/day from epoch (approximate but good enough for logging)
+    let (year, month, day) = civil_from_days(days as i64);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        year, month, day, hours, mins, secs
+    )
+}
+
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    // Algorithm from Howard Hinnant
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CircuitBreakerLimits {
@@ -212,4 +322,201 @@ fn simple_hash(s: &str) -> String {
         hash = hash.wrapping_mul(33).wrapping_add(byte as u64);
     }
     format!("{:016x}", hash)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Canary mode tests ---
+
+    #[test]
+    fn test_circuit_breaker_starts_closed() {
+        // Canary mode starts disabled (analogous to circuit breaker "Closed")
+        exit_canary_mode();
+        assert!(!is_canary());
+        assert_eq!(failure_count(), 0);
+    }
+
+    #[test]
+    fn test_circuit_breaker_trips_on_threshold() {
+        // After N (CANARY_THRESHOLD = 5) consecutive failures, canary mode activates
+        // analogous to circuit breaker "Open"
+        exit_canary_mode();
+        for _ in 0..CANARY_THRESHOLD - 1 {
+            record_failure();
+        }
+        // Threshold not yet reached
+        assert!(!is_canary());
+        // One more triggers canary mode
+        record_failure();
+        assert!(is_canary());
+        assert!(failure_count() >= CANARY_THRESHOLD);
+    }
+
+    #[test]
+    fn test_circuit_breaker_recovers() {
+        // After exiting canary mode and resetting, state goes back to normal
+        // analogous to circuit breaker HalfOpen -> Closed on success
+        exit_canary_mode();
+        assert!(!is_canary());
+        // Trip the breaker
+        for _ in 0..CANARY_THRESHOLD {
+            record_failure();
+        }
+        assert!(is_canary());
+        // "Recovery" — reset failures and exit canary mode
+        reset_failures();
+        exit_canary_mode();
+        assert!(!is_canary());
+        assert_eq!(failure_count(), 0);
+    }
+
+    #[test]
+    fn test_circuit_breaker_stays_open_on_half_open_failure() {
+        // When canary is active and new failures arrive, it stays in canary mode
+        // analogous to HalfOpen -> failure -> Open
+        exit_canary_mode();
+        // Trip the breaker
+        for _ in 0..CANARY_THRESHOLD {
+            record_failure();
+        }
+        assert!(is_canary());
+        // Record more failures — stays in canary mode
+        let prev = is_canary();
+        record_failure();
+        assert!(is_canary());
+        // The canary warning should still indicate degraded state
+        let warning = canary_warning();
+        assert!(warning.is_some());
+        assert!(warning.unwrap().contains("CANARY MODE"));
+    }
+
+    #[test]
+    fn test_circuit_breaker_resets_on_success() {
+        // Reset clears the failure count — analogous to success resetting the breaker
+        exit_canary_mode();
+        record_failure();
+        record_failure();
+        assert_eq!(failure_count(), 2);
+        reset_failures();
+        assert_eq!(failure_count(), 0);
+    }
+
+    #[test]
+    fn test_circuit_breaker_limits_configurable() {
+        // Custom CircuitBreakerLimits can be constructed and have expected defaults
+        let default_limits = CircuitBreakerLimits::default();
+        assert_eq!(default_limits.max_ttl_minutes, 40);
+        assert_eq!(default_limits.max_llm_tokens, Some(500_000));
+        assert_eq!(default_limits.max_budget_usd, Some(2.0));
+        assert_eq!(default_limits.max_identical_failures, 3);
+
+        // Custom limits work
+        let custom = CircuitBreakerLimits {
+            max_ttl_minutes: 10,
+            max_llm_tokens: Some(100_000),
+            max_budget_usd: None,
+            max_identical_failures: 5,
+        };
+        assert_eq!(custom.max_ttl_minutes, 10);
+        assert_eq!(custom.max_llm_tokens, Some(100_000));
+        assert_eq!(custom.max_budget_usd, None);
+        assert_eq!(custom.max_identical_failures, 5);
+    }
+
+    // --- Utility function tests ---
+
+    #[test]
+    fn test_count_consecutive_identical_empty() {
+        assert_eq!(count_consecutive_identical(&[]), 0);
+    }
+
+    #[test]
+    fn test_count_consecutive_identical_single() {
+        assert_eq!(count_consecutive_identical(&["a".into()]), 1);
+    }
+
+    #[test]
+    fn test_count_consecutive_identical_all_same() {
+        let hashes: Vec<String> =
+            vec!["x".into(), "x".into(), "x".into()];
+        assert_eq!(count_consecutive_identical(&hashes), 3);
+    }
+
+    #[test]
+    fn test_count_consecutive_identical_last_different() {
+        let hashes: Vec<String> =
+            vec!["a".into(), "a".into(), "b".into()];
+        assert_eq!(count_consecutive_identical(&hashes), 1);
+    }
+
+    #[test]
+    fn test_count_consecutive_identical_trailing_run() {
+        let hashes: Vec<String> =
+            vec!["a".into(), "b".into(), "b".into(), "b".into()];
+        assert_eq!(count_consecutive_identical(&hashes), 3);
+    }
+
+    #[test]
+    fn test_simple_hash_deterministic() {
+        let h1 = simple_hash("hello world");
+        let h2 = simple_hash("hello world");
+        assert_eq!(h1, h2);
+        assert_eq!(h1.len(), 16);
+    }
+
+    #[test]
+    fn test_simple_hash_different_inputs() {
+        let h1 = simple_hash("error type A");
+        let h2 = simple_hash("error type B");
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn test_simple_hash_long_input_truncated() {
+        let long = "x".repeat(128);
+        let hash = simple_hash(&long);
+        assert_eq!(hash.len(), 16);
+    }
+
+    // --- BreakerTrigger Display ---
+
+    #[test]
+    fn test_breaker_trigger_display() {
+        assert_eq!(BreakerTrigger::Ttl.to_string(), "ttl");
+        assert_eq!(BreakerTrigger::TokenLimit.to_string(), "token_limit");
+        assert_eq!(BreakerTrigger::BudgetLimit.to_string(), "budget_limit");
+        assert_eq!(
+            BreakerTrigger::IdenticalFailures.to_string(),
+            "identical_failures"
+        );
+    }
+
+    // --- Entry / exit idempotency ---
+
+    #[test]
+    fn test_enter_canary_mode_idempotent() {
+        exit_canary_mode();
+        assert!(enter_canary_mode()); // first entry returns true
+        assert!(!enter_canary_mode()); // already in canary mode — returns false
+        exit_canary_mode();
+    }
+
+    #[test]
+    fn test_canary_warning_when_not_canary() {
+        exit_canary_mode();
+        assert!(canary_warning().is_none());
+    }
+
+    #[test]
+    fn test_canary_warning_when_canary() {
+        exit_canary_mode();
+        enter_canary_mode();
+        let warning = canary_warning();
+        assert!(warning.is_some());
+        let msg = warning.unwrap();
+        assert!(msg.contains("CANARY MODE"));
+        assert!(msg.contains(&CANARY_THRESHOLD.to_string()));
+    }
 }

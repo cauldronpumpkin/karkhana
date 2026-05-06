@@ -77,6 +77,10 @@ pub struct WorkerConfig {
     pub litellm_port: Option<u16>,
     #[serde(default)]
     pub litellm_config: Option<serde_json::Value>,
+    #[serde(default)]
+    pub revoked: bool,
+    #[serde(default)]
+    pub revoked_reason: Option<String>,
 }
 
 fn default_display_name() -> String {

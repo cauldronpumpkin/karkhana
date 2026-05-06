@@ -39,6 +39,7 @@ class JobContract:
     allow_network: bool = False
     allow_git_write: bool = False
     job_type: str = "mock"
+    engine_config: dict[str, Any] = field(default_factory=dict)
 
     @property
     def validated(self) -> bool:
@@ -50,6 +51,14 @@ class JobContract:
             if not getattr(self, field_name):
                 missing.append(field_name)
         return missing
+
+    def engine_config_value(self, key: str, default: Any = None) -> Any:
+        """Read a value from engine_config, falling back to metadata.
+
+        Engines should use this to read their configuration: engine-specific
+        settings live in engine_config, but generic overrides may be in metadata.
+        """
+        return self.engine_config.get(key, self.metadata.get(key, default))
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "JobContract":
@@ -67,8 +76,8 @@ class JobContract:
             allowed_commands=[str(item) for item in data.get("allowed_commands") or []],
             denied_commands=[str(item) for item in data.get("denied_commands") or []],
             verification_commands=[str(item) for item in (data.get("verification_commands") or data.get("verify_commands") or [])],
-            step_timeout_seconds=int(data.get("step_timeout_seconds") or data.get("step_time_limit_seconds") or 600),
-            command_timeout_seconds=int(data.get("command_timeout_seconds") or data.get("verification_timeout_seconds") or 300),
+            step_timeout_seconds=int(data.get("step_timeout_seconds") or data.get("step_time_limit_seconds") or data.get("timeout_seconds") or data.get("timeout") or 600),
+            command_timeout_seconds=int(data.get("command_timeout_seconds") or data.get("verification_timeout_seconds") or data.get("verify_timeout_seconds") or data.get("verify_timeout") or 300),
             output_dir=str(data.get("output_dir") or data.get("artifacts_dir") or "artifacts"),
             metadata=dict(data.get("metadata") or {}),
             payload=dict(data.get("payload") or {}),
@@ -80,6 +89,7 @@ class JobContract:
             allow_network=bool(data.get("allow_network", False)),
             allow_git_write=bool(data.get("allow_git_write", False)),
             job_type=str(data.get("job_type") or "mock"),
+            engine_config=dict(data.get("engine_config") or (data.get("engine") if isinstance(data.get("engine"), dict) else {})),
         )
 
 
@@ -97,6 +107,7 @@ class JobResult:
     logs_path: str | None = None
     diff_path: str | None = None
     failure_reason: str | None = None
+    # structured_events: each event is {"type": str, "timestamp": str, "data": Any}
     structured_events: list[dict[str, Any]] = field(default_factory=list)
     review_report_path: str | None = None
     command: str = ""

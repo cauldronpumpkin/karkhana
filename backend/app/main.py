@@ -25,6 +25,8 @@ from backend.app.routers.templates import router as templates_router
 from backend.app.routers.golden_factory_harness import router as golden_factory_harness_router
 from backend.app.routers.template_artifacts import router as template_artifacts_router
 from backend.app.routers.review_packets import router as review_packets_router
+from backend.app.routers.ledger import router as ledger_router
+from backend.app.routers.ws import router as ws_router
 
 
 app = FastAPI(title="Idea Refinery")
@@ -60,6 +62,8 @@ app.include_router(templates_router)
 app.include_router(golden_factory_harness_router)
 app.include_router(template_artifacts_router)
 app.include_router(review_packets_router)
+app.include_router(ledger_router)
+app.include_router(ws_router)
 
 
 @app.get("/api/health")

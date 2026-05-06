@@ -216,6 +216,8 @@ pub fn opencode_contract_failure(
 }
 
 static WORKER_RUNNING: AtomicBool = AtomicBool::new(false);
+static REVOKED: AtomicBool = AtomicBool::new(false);
+static REVOKED_REASON: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 #[tauri::command]
 pub async fn start_worker(app: AppHandle) -> Result<(), String> {
@@ -244,6 +246,63 @@ pub fn get_worker_status() -> bool {
     WORKER_RUNNING.load(Ordering::SeqCst)
 }
 
+#[tauri::command]
+pub fn revoke_worker(reason: String) -> Result<(), String> {
+    revoke_worker_inner(reason)
+}
+
+pub fn revoke_worker_inner(reason: String) -> Result<(), String> {
+    // Clear all local state (pairing tokens, SQS polling state)
+    let state_store = StateStore::new();
+    if let Some(mut state) = state_store.load() {
+        // Clear pairing tokens
+        state.api_token = String::new();
+        state.worker_auth_token = None;
+        // Clear SQS credentials
+        state.credentials = crate::types::WorkerCredentials::default();
+        state_store.save(&state)?;
+    }
+
+    // Set the revoked flag with reason
+    let mut reason_guard = REVOKED_REASON
+        .lock()
+        .map_err(|e| format!("Failed to acquire revoke lock: {}", e))?;
+    *reason_guard = Some(reason.clone());
+    REVOKED.store(true, Ordering::SeqCst);
+
+    // Also persist revoked flag in config
+    let mut config = crate::config::load_config();
+    config.revoked = true;
+    config.revoked_reason = Some(reason);
+    crate::config::save_config(&config)?;
+
+    // Stop the worker loop
+    WORKER_RUNNING.store(false, Ordering::SeqCst);
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn check_revoked() -> Option<String> {
+    check_revoked_inner()
+}
+
+pub fn check_revoked_inner() -> Option<String> {
+    if REVOKED.load(Ordering::SeqCst) {
+        REVOKED_REASON.lock().ok().and_then(|g| g.clone())
+    } else {
+        None
+    }
+}
+
+/// Restore the in-memory revoked flag from persisted config during startup.
+pub fn restore_revoked(reason: Option<String>) {
+    REVOKED.store(true, Ordering::SeqCst);
+    if let Ok(mut guard) = REVOKED_REASON.lock() {
+        *guard = reason;
+    }
+}
+
 struct WorkerContext {
     client: ApiClient,
     config: WorkerConfig,
@@ -255,6 +314,14 @@ struct WorkerContext {
 }
 
 async fn run_worker_loop(app: &AppHandle) -> Result<(), WorkerError> {
+    // Check if worker has been revoked before starting
+    if let Some(reason) = check_revoked_inner() {
+        return Err(WorkerError::Config(format!(
+            "Worker has been revoked: {}",
+            reason
+        )));
+    }
+
     let config = load_config();
     let state_store = StateStore::new();
     let state = state_store
@@ -317,6 +384,14 @@ async fn run_worker_loop(app: &AppHandle) -> Result<(), WorkerError> {
     app.emit("worker-status", json!({"status": "active"})).ok();
 
     while WORKER_RUNNING.load(Ordering::SeqCst) {
+        if let Some(reason) = check_revoked_inner() {
+            app.emit(
+                "worker-error",
+                format!("Worker revoked: {}", reason),
+            )
+            .ok();
+            break;
+        }
         let did_work = run_once(app, &mut ctx).await;
         let wait_secs = if did_work { 5 } else { ctx.config.poll_seconds };
         sleep(Duration::from_secs(wait_secs)).await;

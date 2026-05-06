@@ -1,0 +1,57 @@
+name: Go tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  GO_CACHE_DATE: ${{ github.run_id }}  # placeholder, overridden in first step
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Test and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: node
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set Go cache date
+        id: go-date
+        run: echo "date=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: node/go.mod
+          cache: false  # manual caching with date-based keys
+
+      - name: Restore Go cache
+        uses: actions/cache@v4
+        id: go-cache
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-cache-${{ runner.os }}-${{ hashFiles('node/go.mod') }}-${{ steps.go-date.outputs.date }}
+          restore-keys: |
+            go-cache-${{ runner.os }}-${{ hashFiles('node/go.mod') }}-
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build CLI
+        run: go build ./...
+
+      - name: Trim stale build artifacts
+        run: find ~/.cache/go-build -type f -mmin +90 -delete 2>/dev/null || true

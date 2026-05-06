@@ -1,0 +1,63 @@
+{
+  "method": "gmail-thread",
+  "recipient": "cauldronpumpkin@gmail.com",
+  "reminder_after_hours": 24,
+  "sent_at": "2026-05-06T15:35:00+05:30",
+  "last_checked": "2026-05-06T20:18:00+05:30",
+  "topics": [
+    {
+      "id": 1,
+      "subject": "Tauri v2 macOS Code Signing",
+      "thread_id": "19dfcd38b7946011",
+      "message_id": "19dfcd38b7946011",
+      "replied": true,
+      "reply_msg_id": "19dfcdad791db61c",
+      "saved_to": ".hermes/research/macos-code-signing.md"
+    },
+    {
+      "id": 2,
+      "subject": "GitHub Actions CI/CD for Polyglot Monorepo",
+      "thread_id": "19dfcd40cd0ac1b7",
+      "message_id": "19dfcd40cd0ac1b7",
+      "replied": true,
+      "reply_source": "google-docs",
+      "doc_id": "1WOq5cfcy9ucedTJMYVPAOrBhPZfqJ0FCq8mMmiBERhU",
+      "saved_to": ".hermes/research/cicd-monorepo-research.md"
+    },
+    {
+      "id": 3,
+      "subject": "AWS Cost Optimization for Serverless",
+      "thread_id": "19dfcd40f000b8dc",
+      "message_id": "19dfcd40f000b8dc",
+      "replied": true,
+      "reply_msg_id": "19dfcf9647b6eb67",
+      "saved_to": ".hermes/research/aws-cost-optimization.md"
+    },
+    {
+      "id": 4,
+      "subject": "AI Agent Sandboxing Patterns",
+      "thread_id": "19dfcd4127597fe2",
+      "message_id": "19dfcd4127597fe2",
+      "replied": true,
+      "reply_msg_id": "19dfce47c7c17654",
+      "saved_to": ".hermes/research/ai-sandboxing.md"
+    },
+    {
+      "id": 5,
+      "subject": "WebSocket in SvelteKit + FastAPI",
+      "thread_id": "19dfcd417d4de5fd",
+      "message_id": "19dfcd417d4de5fd",
+      "replied": true,
+      "reply_msg_id": "19dfce07a71277b8",
+      "saved_to": ".hermes/research/websocket-sveltekit-fastapi.md"
+    },
+    {
+      "id": 6,
+      "subject": "Hermes Self-Improvement: Prompt Token Reduction",
+      "thread_id": "19dfe95cab92c6b5",
+      "message_id": "19dfe95cab92c6b5",
+      "replied": false,
+      "expected_tonight": true
+    }
+  ]
+}

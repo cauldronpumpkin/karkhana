@@ -19,7 +19,14 @@
       'sync_remote_state', 'permission_guard', 'circuit_breaker',
       'litellm_proxy', 'diff_api', 'verification_runner', 'graphify_update'
     ],
-    openclaude: {},
+    openclaude: {
+      model: '',
+      agent: '',
+      permission_mode: '',
+      output_format: '',
+      max_budget_usd: '',
+      system_prompt: '',
+    },
     opencode_server_url: 'http://127.0.0.1:4096',
     litellm_port: 4000,
   })

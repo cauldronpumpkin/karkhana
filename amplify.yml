@@ -7,11 +7,10 @@ applications:
         preBuild:
           commands:
             - nvm install 20
-            - cd frontend && npm ci
+            - (cd frontend && npm ci)
         build:
           commands:
-            - cd frontend && echo "VITE_API_BASE_URL=$VITE_API_BASE_URL" > .env.production
-            - cd frontend && npm run build
+            - (cd frontend && echo "VITE_API_BASE_URL=$VITE_API_BASE_URL" > .env.production && npm run build)
       artifacts:
         baseDirectory: frontend/dist
         files:

@@ -11,6 +11,7 @@ pub enum EngineMode {
 }
 
 pub async fn run_agent<P: AsRef<Path>>(
+    app: &tauri::AppHandle,
     repo_dir: P,
     prompt: &str,
     engine: &str,
@@ -22,9 +23,9 @@ pub async fn run_agent<P: AsRef<Path>>(
 
     match mode {
         EngineMode::Server { base_url } => {
-            run_server_agent(&base_url, repo_dir, prompt, settings, logs).await
+            run_server_agent(app, &base_url, repo_dir, prompt, settings, logs).await
         }
-        EngineMode::Cli => run_cli_agent(repo_dir, prompt, engine, settings, logs).await,
+        EngineMode::Cli => run_cli_agent(app, repo_dir, prompt, engine, settings, logs).await,
     }
 }
 
@@ -50,6 +51,7 @@ fn resolve_engine_mode(
 }
 
 async fn run_server_agent<P: AsRef<Path>>(
+    app: &tauri::AppHandle,
     base_url: &str,
     _repo_dir: P,
     prompt: &str,
@@ -61,7 +63,11 @@ async fn run_server_agent<P: AsRef<Path>>(
     match client.health().await {
         Ok(health) if health.healthy => {}
         _ => {
-            logs.push("OpenCode server not available; server mode requires a healthy OpenCode endpoint".to_string());
+            crate::worker::emit_log_event(
+                app,
+                logs,
+                "OpenCode server not available; server mode requires a healthy OpenCode endpoint".to_string(),
+            );
             return String::new();
         }
     }
@@ -69,7 +75,7 @@ async fn run_server_agent<P: AsRef<Path>>(
     let session = match client.create_session("idearefinery-task").await {
         Ok(s) => s,
         Err(e) => {
-            logs.push(format!("Failed to create session: {e}"));
+            crate::worker::emit_log_event(app, logs, format!("Failed to create session: {e}"));
             return String::new();
         }
     };
@@ -96,13 +102,13 @@ async fn run_server_agent<P: AsRef<Path>>(
                 .collect();
             let output = text.join("\n");
             if !output.trim().is_empty() {
-                logs.push(output.trim().to_string());
+                crate::worker::emit_log_event(app, logs, output.trim().to_string());
             }
             let _ = client.delete_session(&session.id).await;
             output
         }
         Err(e) => {
-            logs.push(format!("Failed to send message: {e}"));
+            crate::worker::emit_log_event(app, logs, format!("Failed to send message: {e}"));
             let _ = client.delete_session(&session.id).await;
             String::new()
         }
@@ -110,6 +116,7 @@ async fn run_server_agent<P: AsRef<Path>>(
 }
 
 async fn run_cli_agent<P: AsRef<Path>>(
+    app: &tauri::AppHandle,
     repo_dir: P,
     prompt: &str,
     engine: &str,
@@ -154,16 +161,21 @@ async fn run_cli_agent<P: AsRef<Path>>(
         }
         cmd.push(prompt.to_string());
         let args: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
-        return run_command(&args, repo_dir, logs).await;
+        return run_command(app, &args, repo_dir, logs).await;
     }
 
     if engine == "opencode-server" {
-        logs.push("OpenCode server mode requested without a server client; refusing CLI fallback.".to_string());
+        crate::worker::emit_log_event(
+            app,
+            logs,
+            "OpenCode server mode requested without a server client; refusing CLI fallback.".to_string(),
+        );
         return String::new();
     }
 
     if engine == "opencode" && which::which("opencode").is_ok() {
         return run_command(
+            app,
             &["opencode", "run", prompt],
             repo_dir,
             logs,
@@ -173,6 +185,7 @@ async fn run_cli_agent<P: AsRef<Path>>(
 
     if which::which("codex").is_ok() {
         return run_command(
+            app,
             &["codex", "exec", "-C", repo_dir.to_str().unwrap_or("."), prompt],
             repo_dir,
             logs,
@@ -180,15 +193,17 @@ async fn run_cli_agent<P: AsRef<Path>>(
         .await;
     }
 
-    logs.push(
+    crate::worker::emit_log_event(
+        app,
+        logs,
         "No local coding engine found; returning deterministic fallback.".to_string(),
     );
     String::new()
 }
 
-async fn run_command(args: &[&str], cwd: &Path, logs: &mut Vec<String>) -> String {
+async fn run_command(app: &tauri::AppHandle, args: &[&str], cwd: &Path, logs: &mut Vec<String>) -> String {
     let label = args.join(" ");
-    logs.push(format!("$ {}", label));
+    crate::worker::emit_log_event(app, logs, format!("$ {}", label));
 
     let mut cmd = Command::new(args[0]);
     cmd.current_dir(cwd);
@@ -197,7 +212,7 @@ async fn run_command(args: &[&str], cwd: &Path, logs: &mut Vec<String>) -> Strin
     let output = match cmd.output().await {
         Ok(o) => o,
         Err(e) => {
-            logs.push(format!("Failed to spawn: {}", e));
+            crate::worker::emit_log_event(app, logs, format!("Failed to spawn: {}", e));
             return String::new();
         }
     };
@@ -206,9 +221,9 @@ async fn run_command(args: &[&str], cwd: &Path, logs: &mut Vec<String>) -> Strin
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{}{}", stdout, stderr);
     if !combined.trim().is_empty() {
-        logs.push(combined.trim().to_string());
+        crate::worker::emit_log_event(app, logs, combined.trim().to_string());
     }
-    logs.push(format!("exit code: {}", output.status.code().unwrap_or(-1)));
+    crate::worker::emit_log_event(app, logs, format!("exit code: {}", output.status.code().unwrap_or(-1)));
 
     combined
 }

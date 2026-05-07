@@ -18,7 +18,25 @@ export const health = writable({
 })
 
 export function updateHealth(data) {
-  health.update(h => ({ ...h, ...data }))
+  const source = data && typeof data === 'object' ? data : {}
+  const {
+    api_connected,
+    sqs_messages_waiting,
+    opencode_session_count,
+    last_successful_job,
+    error_count_last_hour,
+    ...rest
+  } = source
+
+  health.update(h => ({
+    ...h,
+    ...rest,
+    apiConnected: rest.apiConnected ?? api_connected ?? h.apiConnected,
+    sqsMessages: rest.sqsMessages ?? sqs_messages_waiting ?? h.sqsMessages,
+    sessionCount: rest.sessionCount ?? opencode_session_count ?? h.sessionCount,
+    lastJobTime: rest.lastJobTime ?? last_successful_job ?? h.lastJobTime,
+    errorCount: rest.errorCount ?? error_count_last_hour ?? h.errorCount,
+  }))
 }
 
 // --- Log entries store (structured, max 1000) ---

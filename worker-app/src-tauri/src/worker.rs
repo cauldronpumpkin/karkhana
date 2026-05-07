@@ -3,7 +3,7 @@ use crate::api::ApiClient;
 use crate::circuit_breaker::{CircuitBreaker, CircuitBreakerLimits};
 use crate::config::load_config;
 use crate::error::WorkerError;
-use crate::git::ensure_repo;
+use crate::git::ensure_repo_with_app;
 use crate::indexing::index_repo;
 use crate::litellm::{LiteLLMConfig, LiteLLMProxy};
 use crate::opencode_session::OpenCodeClient;
@@ -175,6 +175,21 @@ fn string_list(value: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+pub(crate) fn emit_log_event(app: &AppHandle, logs: &mut Vec<String>, line: String) {
+    logs.push(line.clone());
+    let _ = app.emit("worker-log", json!({"line": line}));
+}
+
+fn effective_api_token(state: &WorkerState) -> String {
+    state
+        .credentials
+        .api_token
+        .as_ref()
+        .filter(|token| !token.trim().is_empty())
+        .cloned()
+        .unwrap_or_else(|| state.api_token.clone())
+}
+
 fn tail_text(value: &str, max_chars: usize) -> String {
     let chars: Vec<char> = value.chars().collect();
     if chars.len() <= max_chars {
@@ -327,7 +342,7 @@ async fn run_worker_loop(app: &AppHandle) -> Result<(), WorkerError> {
     let state = state_store
         .load()
         .ok_or_else(|| WorkerError::Config("Worker not paired".to_string()))?;
-    let mut client = ApiClient::new(state.api_base.clone(), state.api_token.clone());
+    let mut client = ApiClient::new(state.api_base.clone(), effective_api_token(&state));
     if let Some(ref wat) = state.worker_auth_token {
         client = client.with_worker_auth_token(wat.clone());
     }
@@ -381,6 +396,7 @@ async fn run_worker_loop(app: &AppHandle) -> Result<(), WorkerError> {
         }
     }
 
+    crate::state::set_api_connected(true);
     app.emit("worker-status", json!({"status": "active"})).ok();
 
     while WORKER_RUNNING.load(Ordering::SeqCst) {
@@ -513,12 +529,14 @@ async fn claim_and_process(app: &AppHandle, ctx: &mut WorkerContext) -> bool {
 }
 
 async fn process_job(
-    _app: &AppHandle,
+    app: &AppHandle,
     ctx: &mut WorkerContext,
     job: &Job,
     project: &Project,
     logs: &mut Vec<String>,
 ) -> Result<serde_json::Value, WorkerError> {
+    emit_log_event(app, logs, format!("Claimed job: {} (type: {})", &job.id[..job.id.len().min(8)], job.job_type));
+    crate::state::set_api_connected(true);
     let _ = ctx
         .client
         .heartbeat_job(
@@ -532,7 +550,9 @@ async fn process_job(
         .await;
 
     let repo_dir = ctx.workspace.join(slug(&project.repo_full_name));
-    ensure_repo(
+    emit_log_event(app, logs, "Setting up repository...".to_string());
+    ensure_repo_with_app(
+        Some(app),
         &repo_dir,
         &project.clone_url,
         project.default_branch.as_deref().unwrap_or("main"),
@@ -540,6 +560,7 @@ async fn process_job(
     )
     .await
     .map_err(WorkerError::from)?;
+    emit_log_event(app, logs, "Repository ready.".to_string());
 
     let payload_obj = job
         .payload
@@ -568,7 +589,7 @@ async fn process_job(
     match job.job_type.as_str() {
         "repo_index" => {
             let index = index_repo(&repo_dir).await;
-            let sha = crate::git::git_rev_parse_head(&repo_dir, logs)
+            let sha = crate::git::git_rev_parse_head(Some(app), &repo_dir, logs)
                 .await
                 .unwrap_or_default();
             Ok(json!({"commit_sha": sha, "code_index": index, "tests_passed": true}))
@@ -582,6 +603,7 @@ async fn process_job(
 
             let _ = crate::sandbox::write_agents_md(&repo_dir);
             let output = run_with_circuit_breaker(
+                app,
                 ctx,
                 &repo_dir,
                 &prompt,
@@ -593,13 +615,14 @@ async fn process_job(
 
             let mut index = index;
             index.architecture_summary = output.output.clone();
-            let sha = crate::git::git_rev_parse_head(&repo_dir, logs)
+            let sha = crate::git::git_rev_parse_head(Some(app), &repo_dir, logs)
                 .await
                 .unwrap_or_default();
             Ok(json!({"commit_sha": sha, "code_index": index, "tests_passed": true}))
         }
         "agent_branch_work" | "test_verify" => {
             let result = branch_work_with_server(
+                app,
                 ctx,
                 &repo_dir,
                 job,
@@ -609,13 +632,14 @@ async fn process_job(
                 logs,
             )
             .await?;
+            emit_log_event(app, logs, "Job completed successfully.".to_string());
             Ok(serde_json::to_value(result).unwrap_or_default())
         }
         "sync_remote_state" => {
-            crate::git::git_fetch_all(&repo_dir, logs)
+            crate::git::git_fetch_all(Some(app), &repo_dir, logs)
                 .await
                 .map_err(|e| WorkerError::Git(e))?;
-            let sha = crate::git::git_rev_parse_head(&repo_dir, logs)
+            let sha = crate::git::git_rev_parse_head(Some(app), &repo_dir, logs)
                 .await
                 .unwrap_or_default();
             Ok(json!({"commit_sha": sha, "tests_passed": true}))
@@ -636,6 +660,7 @@ struct CircuitBreakerResult {
 }
 
 async fn run_with_circuit_breaker(
+    app: &AppHandle,
     ctx: &mut WorkerContext,
     repo_dir: &PathBuf,
     prompt: &str,
@@ -644,7 +669,7 @@ async fn run_with_circuit_breaker(
 ) -> CircuitBreakerResult {
     if let Some(ref opencode_client) = ctx.opencode_client {
         let client_clone = opencode_client.clone();
-        run_server_with_breaker(&client_clone, ctx, repo_dir, prompt, limits, logs).await
+        run_server_with_breaker(app, &client_clone, ctx, repo_dir, prompt, limits, logs).await
     } else if is_opencode_server_engine(&ctx.config.engine) {
         CircuitBreakerResult {
             output: String::new(),
@@ -663,6 +688,7 @@ async fn run_with_circuit_breaker(
         }
     } else {
         let output = run_agent(
+            app,
             repo_dir,
             prompt,
             &ctx.config.engine,
@@ -680,6 +706,7 @@ async fn run_with_circuit_breaker(
 }
 
 async fn run_server_with_breaker(
+    app: &AppHandle,
     opencode_client: &OpenCodeClient,
     ctx: &mut WorkerContext,
     _repo_dir: &PathBuf,
@@ -690,6 +717,7 @@ async fn run_server_with_breaker(
     match opencode_client.health().await {
         Ok(health) if health.healthy => {}
         Ok(health) => {
+            emit_log_event(app, logs, "OpenCode server reported unhealthy status".to_string());
             return CircuitBreakerResult {
                 output: String::new(),
                 session_id: None,
@@ -704,6 +732,7 @@ async fn run_server_with_breaker(
             };
         }
         Err(e) => {
+            emit_log_event(app, logs, format!("OpenCode health check failed: {e}"));
             return CircuitBreakerResult {
                 output: String::new(),
                 session_id: None,
@@ -722,7 +751,7 @@ async fn run_server_with_breaker(
     let session = match opencode_client.create_session("idearefinery-task").await {
         Ok(s) => s,
         Err(e) => {
-            logs.push(format!("Failed to create session: {e}"));
+            emit_log_event(app, logs, format!("Failed to create session: {e}"));
             return CircuitBreakerResult {
                 output: String::new(),
                 session_id: None,
@@ -739,7 +768,7 @@ async fn run_server_with_breaker(
         }
     };
 
-    logs.push(format!("Created OpenCode session: {}", session.id));
+    emit_log_event(app, logs, format!("Created OpenCode session: {}", session.id));
 
     let breaker = CircuitBreaker::new(
         opencode_client.clone(),
@@ -806,7 +835,7 @@ async fn run_server_with_breaker(
                 .collect();
             let output = text.join("\n");
             if !output.trim().is_empty() {
-                logs.push(output.trim().to_string());
+                emit_log_event(app, logs, output.trim().to_string());
             }
             let empty_output_error = if output.trim().is_empty() {
                 Some(structured_failure(
@@ -854,7 +883,7 @@ async fn run_server_with_breaker(
             }
         }
         Err(e) => {
-            logs.push(format!("OpenCode session error: {e}"));
+            emit_log_event(app, logs, format!("OpenCode session error: {e}"));
             let _ = opencode_client.delete_session(&session.id).await;
             CircuitBreakerResult {
                 output: String::new(),
@@ -874,6 +903,7 @@ async fn run_server_with_breaker(
 }
 
 async fn branch_work_with_server(
+    app: &AppHandle,
     ctx: &mut WorkerContext,
     repo_dir: &PathBuf,
     job: &Job,
@@ -897,9 +927,11 @@ async fn branch_work_with_server(
 
     let branch = resolve_work_branch_name(job, project, &payload_obj);
 
-    crate::git::git_checkout_new_branch(repo_dir, &branch, logs)
+    emit_log_event(app, logs, format!("Creating work branch: {}", branch));
+    crate::git::git_checkout_new_branch(Some(app), repo_dir, &branch, logs)
         .await
         .map_err(|e| WorkerError::Git(e))?;
+    emit_log_event(app, logs, "Work branch ready.".to_string());
 
     let mut prompt = payload_obj
         .get("prompt")
@@ -916,7 +948,8 @@ async fn branch_work_with_server(
 
     let _ = crate::sandbox::write_agents_md(repo_dir);
 
-    let cb_result = run_with_circuit_breaker(ctx, repo_dir, &prompt, limits, logs).await;
+    emit_log_event(app, logs, "Running agent...".to_string());
+    let cb_result = run_with_circuit_breaker(app, ctx, repo_dir, &prompt, limits, logs).await;
 
     crate::sandbox::remove_agents_md(repo_dir).ok();
 
@@ -960,8 +993,9 @@ async fn branch_work_with_server(
         )));
     }
 
+    emit_log_event(app, logs, format!("Running verification: {} commands", verification_commands.len()));
     let (verification_results, tests_passed, graphify_updated) =
-        run_verification_commands(repo_dir, &verification_commands, logs).await;
+        run_verification_commands(app, repo_dir, &verification_commands, logs).await;
 
     if !tests_passed {
         return Err(WorkerError::from(structured_failure(
@@ -974,15 +1008,15 @@ async fn branch_work_with_server(
         )));
     }
 
-    let status = crate::git::git_status_porcelain(repo_dir, logs)
+    let status = crate::git::git_status_porcelain(Some(app), repo_dir, logs)
         .await
         .map_err(WorkerError::Git)?;
-    let mut commit_sha = crate::git::git_rev_parse_head(repo_dir, logs)
+    let mut commit_sha = crate::git::git_rev_parse_head(Some(app), repo_dir, logs)
         .await
         .map_err(WorkerError::Git)?;
 
     if !status.trim().is_empty() {
-        crate::git::git_add_all(repo_dir, logs)
+        crate::git::git_add_all(Some(app), repo_dir, logs)
             .await
             .map_err(WorkerError::Git)?;
         let commit_message = payload_obj
@@ -991,13 +1025,13 @@ async fn branch_work_with_server(
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| format!("feat: idea refinery task {}", &job.id[..job.id.len().min(8)]));
-        crate::git::git_commit(repo_dir, &commit_message, logs)
+        crate::git::git_commit(Some(app), repo_dir, &commit_message, logs)
             .await
             .map_err(WorkerError::Git)?;
-        commit_sha = crate::git::git_rev_parse_head(repo_dir, logs)
+        commit_sha = crate::git::git_rev_parse_head(Some(app), repo_dir, logs)
             .await
             .map_err(WorkerError::Git)?;
-        crate::git::git_push(repo_dir, &branch, "origin", logs)
+        crate::git::git_push(Some(app), repo_dir, &branch, "origin", logs)
             .await
             .map_err(WorkerError::Git)?;
     }
@@ -1029,6 +1063,7 @@ async fn branch_work_with_server(
 }
 
 async fn run_verification_commands(
+    app: &AppHandle,
     repo_dir: &PathBuf,
     commands: &[String],
     logs: &mut Vec<String>,
@@ -1049,7 +1084,7 @@ async fn run_verification_commands(
             continue;
         }
 
-        logs.push(format!("$ {}", command));
+        emit_log_event(app, logs, format!("$ {command}"));
         let output = match tokio::process::Command::new(parts[0])
             .current_dir(repo_dir)
             .args(&parts[1..])
@@ -1066,7 +1101,7 @@ async fn run_verification_commands(
                     stderr_tail: tail_text(&error.to_string(), 1000),
                     duration_seconds: start.elapsed().as_secs_f64(),
                 };
-                logs.push(result.stderr_tail.clone());
+                emit_log_event(app, logs, result.stderr_tail.clone());
                 results.push(result);
                 all_passed = false;
                 continue;
@@ -1078,10 +1113,10 @@ async fn run_verification_commands(
         let stdout_tail = tail_text(&stdout, 1000);
         let stderr_tail = tail_text(&stderr, 1000);
         if !stdout_tail.trim().is_empty() {
-            logs.push(stdout_tail.clone());
+            emit_log_event(app, logs, stdout_tail.clone());
         }
         if !stderr_tail.trim().is_empty() {
-            logs.push(stderr_tail.clone());
+            emit_log_event(app, logs, stderr_tail.clone());
         }
 
         let exit_code = output.status.code();
@@ -1110,7 +1145,8 @@ async fn run_verification_commands(
 
 #[cfg(test)]
 mod tests {
-    use super::is_graphify_update_command;
+    use super::{effective_api_token, is_graphify_update_command};
+    use crate::types::{WorkerCredentials, WorkerState};
 
     #[test]
     fn graphify_update_detection_is_exact() {
@@ -1119,6 +1155,35 @@ mod tests {
         assert!(!is_graphify_update_command("echo graphify update ."));
         assert!(!is_graphify_update_command("graphify status"));
         assert!(!is_graphify_update_command("graphify-update ."));
+    }
+
+    #[test]
+    fn worker_state_prefers_approved_worker_api_token() {
+        let state = WorkerState {
+            api_base: "http://localhost".to_string(),
+            worker_id: "worker-1".to_string(),
+            api_token: "legacy-token".to_string(),
+            credentials: WorkerCredentials {
+                api_token: Some("approved-token".to_string()),
+                ..WorkerCredentials::default()
+            },
+            worker_auth_token: Some("static-token".to_string()),
+        };
+
+        assert_eq!(effective_api_token(&state), "approved-token");
+    }
+
+    #[test]
+    fn worker_state_falls_back_to_legacy_api_token() {
+        let state = WorkerState {
+            api_base: "http://localhost".to_string(),
+            worker_id: "worker-2".to_string(),
+            api_token: "legacy-token".to_string(),
+            credentials: WorkerCredentials::default(),
+            worker_auth_token: None,
+        };
+
+        assert_eq!(effective_api_token(&state), "legacy-token");
     }
 }
 

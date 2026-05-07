@@ -26,6 +26,8 @@ fn test_config_roundtrip() {
         opencode_server_url: None,
         litellm_port: None,
         litellm_config: None,
+        revoked: false,
+        revoked_reason: None,
     };
 
     let temp_dir = std::env::temp_dir().join("idearefinery-worker-test");
@@ -227,6 +229,8 @@ fn test_save_config_writes_new_path_only() {
         opencode_server_url: None,
         litellm_port: None,
         litellm_config: None,
+        revoked: false,
+        revoked_reason: None,
     };
 
     save_config_to_dir(&base, &config).unwrap();

@@ -159,3 +159,32 @@ impl ApiClient {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ApiClient;
+    use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
+
+    #[test]
+    fn api_client_builds_consistent_worker_auth_headers() {
+        let client = ApiClient::new("http://localhost:3000".to_string(), "approved-token".to_string())
+            .with_worker_auth_token("static-token".to_string());
+
+        let headers = client.headers();
+
+        assert_eq!(
+            headers.get(CONTENT_TYPE).and_then(|value| value.to_str().ok()),
+            Some("application/json"),
+        );
+        assert_eq!(
+            headers.get(AUTHORIZATION).and_then(|value| value.to_str().ok()),
+            Some("Bearer approved-token"),
+        );
+        assert_eq!(
+            headers
+                .get("X-IdeaRefinery-Worker-Token")
+                .and_then(|value| value.to_str().ok()),
+            Some("static-token"),
+        );
+    }
+}

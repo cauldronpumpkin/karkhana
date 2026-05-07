@@ -327,11 +327,30 @@ fn simple_hash(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+struct CanaryStateGuard;
+
+impl Drop for CanaryStateGuard {
+    fn drop(&mut self) {
+        reset_failures();
+        exit_canary_mode();
+    }
+}
+
+fn take_canary_state_guard() -> CanaryStateGuard {
+    reset_failures();
+    exit_canary_mode();
+    CanaryStateGuard
+}
 
     // --- Canary mode tests ---
 
     #[test]
     fn test_circuit_breaker_starts_closed() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let _state_guard = take_canary_state_guard();
         // Canary mode starts disabled (analogous to circuit breaker "Closed")
         exit_canary_mode();
         assert!(!is_canary());
@@ -340,6 +359,8 @@ mod tests {
 
     #[test]
     fn test_circuit_breaker_trips_on_threshold() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let _state_guard = take_canary_state_guard();
         // After N (CANARY_THRESHOLD = 5) consecutive failures, canary mode activates
         // analogous to circuit breaker "Open"
         exit_canary_mode();
@@ -356,6 +377,8 @@ mod tests {
 
     #[test]
     fn test_circuit_breaker_recovers() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let _state_guard = take_canary_state_guard();
         // After exiting canary mode and resetting, state goes back to normal
         // analogous to circuit breaker HalfOpen -> Closed on success
         exit_canary_mode();
@@ -374,6 +397,8 @@ mod tests {
 
     #[test]
     fn test_circuit_breaker_stays_open_on_half_open_failure() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let _state_guard = take_canary_state_guard();
         // When canary is active and new failures arrive, it stays in canary mode
         // analogous to HalfOpen -> failure -> Open
         exit_canary_mode();
@@ -383,7 +408,7 @@ mod tests {
         }
         assert!(is_canary());
         // Record more failures — stays in canary mode
-        let prev = is_canary();
+        let _prev = is_canary();
         record_failure();
         assert!(is_canary());
         // The canary warning should still indicate degraded state
@@ -394,7 +419,9 @@ mod tests {
 
     #[test]
     fn test_circuit_breaker_resets_on_success() {
-        // Reset clears the failure count — analogous to success resetting the breaker
+        let _guard = TEST_LOCK.lock().unwrap();
+        let _state_guard = take_canary_state_guard();
+        // Reset clears the failure count - analogous to success resetting the breaker
         exit_canary_mode();
         record_failure();
         record_failure();
@@ -497,6 +524,8 @@ mod tests {
 
     #[test]
     fn test_enter_canary_mode_idempotent() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let _state_guard = take_canary_state_guard();
         exit_canary_mode();
         assert!(enter_canary_mode()); // first entry returns true
         assert!(!enter_canary_mode()); // already in canary mode — returns false
@@ -505,12 +534,16 @@ mod tests {
 
     #[test]
     fn test_canary_warning_when_not_canary() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let _state_guard = take_canary_state_guard();
         exit_canary_mode();
         assert!(canary_warning().is_none());
     }
 
     #[test]
     fn test_canary_warning_when_canary() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let _state_guard = take_canary_state_guard();
         exit_canary_mode();
         enter_canary_mode();
         let warning = canary_warning();
@@ -520,3 +553,6 @@ mod tests {
         assert!(msg.contains(&CANARY_THRESHOLD.to_string()));
     }
 }
+
+
+

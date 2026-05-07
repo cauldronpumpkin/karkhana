@@ -6,7 +6,23 @@
   import Input from '../UI/Input.svelte'
   import Badge from '../UI/Badge.svelte'
 
-  let config = $state({})
+  let config = $state({
+    api_base: 'https://api.karkhana.one',
+    display_name: 'Karkhana Worker',
+    engine: 'opencode-server',
+    tenant_id: '',
+    workspace_root: '~/.idearefinery-worker/repos',
+    poll_seconds: 20,
+    capabilities: [
+      'repo_index', 'architecture_dossier', 'gap_analysis',
+      'build_task_plan', 'agent_branch_work', 'test_verify',
+      'sync_remote_state', 'permission_guard', 'circuit_breaker',
+      'litellm_proxy', 'diff_api', 'verification_runner', 'graphify_update'
+    ],
+    openclaude: {},
+    opencode_server_url: 'http://127.0.0.1:4096',
+    litellm_port: 4000,
+  })
   let saved = $state(false)
 
   const capabilities = [

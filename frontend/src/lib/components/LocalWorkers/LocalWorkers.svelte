@@ -1,21 +1,25 @@
 <script>
   import { onMount } from 'svelte';
-  import { CheckCircle2, Clipboard, KeyRound, Link2, Loader2, RefreshCw, RotateCw, ServerCog, ShieldOff, TerminalSquare, XCircle } from 'lucide-svelte';
+  import { CheckCircle2, Clipboard, Link2, Loader2, RefreshCw, RotateCw, ServerCog, ShieldOff, TerminalSquare, XCircle } from 'lucide-svelte';
   import Button from '../UI/Button.svelte';
   import Badge from '../UI/Badge.svelte';
-  import { API_BASE } from '../../api.js';
+  import { api, buildApiUrl } from '../../api.js';
 
-  const API_GATEWAY = API_BASE?.replace(/\/$/, '') || '';
-  const WORKER_API_BASE = (import.meta.env.VITE_WORKER_API_BASE_URL || API_GATEWAY || window.location.origin).replace(/\/$/, '');
+  const WORKER_API_BASE = (import.meta.env.VITE_WORKER_API_BASE_URL || window.location.origin).replace(/\/$/, '');
 
-  async function gwApi(path, opts = {}) {
-    const isBodyMethod = opts.method === 'POST' || opts.method === 'PUT' || opts.method === 'PATCH';
-    const headers = isBodyMethod ? { 'Content-Type': 'application/json' } : {};
-    const res = await fetch(`${API_GATEWAY}${path}`, { headers, ...opts });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
+  function normalizeWorkerState(data) {
+    if (!data || typeof data !== 'object') {
+      return { workers: [], requests: [], events: [], jobs: [] };
+    }
+
+    return {
+      ...data,
+      workers: Array.isArray(data.workers) ? data.workers : [],
+      requests: Array.isArray(data.requests) ? data.requests : [],
+      events: Array.isArray(data.events) ? data.events : [],
+      jobs: Array.isArray(data.jobs) ? data.jobs : [],
+    };
   }
-  async function gwPost(path, body) { return gwApi(path, { method: 'POST', body: JSON.stringify(body) }); }
 
   let state = $state({ workers: [], requests: [], events: [], jobs: [] });
   let isLoading = $state(true);
@@ -128,9 +132,10 @@
   async function loadWorkers() {
     isLoading = true; error = '';
     try {
-      state = await gwApi('/api/local-workers');
+      state = normalizeWorkerState(await api('/api/local-workers'));
     } catch (err) {
       error = err.message || 'Failed to load workers.';
+      state = normalizeWorkerState();
     } finally {
       isLoading = false;
     }
@@ -139,9 +144,10 @@
   async function generateInviteLink() {
     isActing = 'invite'; error = '';
     try {
-      const res = await fetch(`${API_GATEWAY}/api/worker/invite-link?api_base=${encodeURIComponent(WORKER_API_BASE)}${workerIdInput ? `&worker_id=${encodeURIComponent(workerIdInput)}` : ''}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const data = await api(buildApiUrl('/api/worker/invite-link', {
+        api_base: WORKER_API_BASE,
+        worker_id: workerIdInput || undefined,
+      }));
       inviteLink = data.invite_link;
     } catch (err) {
       error = err.message || 'Failed to generate invite link.';
@@ -158,35 +164,35 @@
 
   async function approve(requestId) {
     await act(`approve:${requestId}`, async () => {
-      await gwPost(`/api/local-workers/requests/${requestId}/approve`, {});
+      await api(`/api/local-workers/requests/${requestId}/approve`, { method: 'POST', body: {} });
       await loadWorkers();
     });
   }
 
   async function deny(requestId) {
     await act(`deny:${requestId}`, async () => {
-      await gwPost(`/api/local-workers/requests/${requestId}/deny`, { reason: 'Denied from dashboard' });
+      await api(`/api/local-workers/requests/${requestId}/deny`, { method: 'POST', body: { reason: 'Denied from dashboard' } });
       await loadWorkers();
     });
   }
 
   async function revoke(workerId) {
     await act(`revoke:${workerId}`, async () => {
-      await gwPost(`/api/local-workers/${workerId}/revoke`, {});
+      await api(`/api/local-workers/${workerId}/revoke`, { method: 'POST', body: {} });
       await loadWorkers();
     });
   }
 
   async function rotate(workerId) {
     await act(`rotate:${workerId}`, async () => {
-      await gwPost(`/api/local-workers/${workerId}/rotate-credentials`, {});
+      await api(`/api/local-workers/${workerId}/rotate-credentials`, { method: 'POST', body: {} });
       await loadWorkers();
     });
   }
 
   async function purgeRevoked() {
     await act('purge-revoked', async () => {
-      await gwPost('/api/local-workers/purge-revoked', {});
+      await api('/api/local-workers/purge-revoked', { method: 'POST', body: {} });
       await loadWorkers();
     });
   }

@@ -1,9 +1,132 @@
 export const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
-function buildUrl(path) {
-  if (/^https?:\/\//.test(path)) return path;
-  if (!API_BASE) return path;
-  return `${API_BASE.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
+function isAbsoluteUrl(path) {
+  return /^https?:\/\//i.test(path);
+}
+
+function normalizePath(path) {
+  return path.startsWith('/') ? path : `/${path}`;
+}
+
+function isFormDataLike(body) {
+  if (typeof FormData !== 'undefined' && body instanceof FormData) return true;
+  return Boolean(body && typeof body === 'object' && typeof body.append === 'function');
+}
+
+function normalizeHeaders(headers = {}) {
+  if (headers instanceof Headers) {
+    return Object.fromEntries(headers.entries());
+  }
+
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+
+  return { ...headers };
+}
+
+function hasContentType(headers) {
+  return Object.keys(headers).some((key) => key.toLowerCase() === 'content-type');
+}
+
+function isJsonLikeBody(body) {
+  return body !== null
+    && typeof body === 'object'
+    && !isFormDataLike(body)
+    && !(body instanceof Blob)
+    && !(body instanceof ArrayBuffer)
+    && !(body instanceof URLSearchParams);
+}
+
+function appendQuery(url, query = {}) {
+  const [base, existingQuery = ''] = url.split('?');
+  const params = new URLSearchParams(existingQuery);
+  for (const [key, value] of Object.entries(query || {})) {
+    if (value === undefined || value === null || value === '') continue;
+    params.set(key, String(value));
+  }
+
+  const queryString = params.toString();
+  return queryString ? `${base}?${queryString}` : base;
+}
+
+export function buildApiUrl(path, query = null, base = API_BASE) {
+  const url = isAbsoluteUrl(path)
+    ? path
+    : `${base ? base.replace(/\/$/, '') : ''}/${normalizePath(path).replace(/^\//, '')}`;
+
+  return query ? appendQuery(url, query) : url;
+}
+
+function getResponseHeader(response, name) {
+  return response?.headers?.get?.(name) || response?.headers?.[name.toLowerCase()] || '';
+}
+
+function looksLikeJson(contentType, text) {
+  return /json/i.test(contentType) || /^[\s\r\n]*[{\[]/.test(text);
+}
+
+function looksLikeHtml(contentType, text) {
+  return /html/i.test(contentType)
+    || /^[\s\r\n]*<!doctype html/i.test(text)
+    || /^[\s\r\n]*<html[\s>]/i.test(text);
+}
+
+function extractDetail(payload) {
+  if (payload && typeof payload === 'object') {
+    if (typeof payload.detail === 'string') return payload.detail;
+    if (typeof payload.message === 'string') return payload.message;
+    if (typeof payload.error === 'string') return payload.error;
+    if (payload.detail != null) return payload.detail;
+  }
+
+  if (typeof payload === 'string') return payload;
+  return null;
+}
+
+function formatMessage(detail, fallback) {
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (detail && typeof detail === 'object') {
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
+async function parseResponseBody(response) {
+  const status = response.status;
+  const contentType = getResponseHeader(response, 'content-type');
+  if (status === 204) {
+    return { body: null, text: '', contentType };
+  }
+
+  const text = await response.text();
+  if (!text || !text.trim()) return { body: null, text, contentType };
+
+  if (looksLikeJson(contentType, text)) {
+    try {
+      return { body: JSON.parse(text), text, contentType };
+    } catch {
+      return { body: text, text, contentType };
+    }
+  }
+
+  return { body: text, text, contentType };
+}
+
+export class ApiError extends Error {
+  constructor({ status, url, method, detail, message, responseBody }) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.url = url;
+    this.method = method;
+    this.detail = detail;
+    this.responseBody = responseBody;
+  }
 }
 
 export function buildWebSocketUrl(path) {
@@ -21,27 +144,53 @@ export function buildWebSocketUrl(path) {
 }
 
 export async function api(path, options = {}) {
-  const url = buildUrl(path);
-  const defaultOptions = {
-    headers: {
-      'Content-Type': 'application/json',
-    },
+  const url = buildApiUrl(path);
+  const method = (options.method || 'GET').toUpperCase();
+  const headers = normalizeHeaders(options.headers);
+  let body = options.body;
+
+  if (isFormDataLike(body)) {
+    delete headers['Content-Type'];
+    delete headers['content-type'];
+  } else if (isJsonLikeBody(body)) {
+    if (!hasContentType(headers)) {
+      headers['Content-Type'] = 'application/json';
+    }
+    body = JSON.stringify(body);
+  }
+
+  const requestInit = {
     ...options,
+    method,
+    headers: Object.keys(headers).length ? headers : undefined,
+    body,
   };
 
   try {
-    const response = await fetch(url, defaultOptions);
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    
-    if (response.status === 204) return null;
+    const response = await fetch(url, requestInit);
+    const parsedResponse = await parseResponseBody(response);
+    const parsedBody = parsedResponse.body;
 
-    const text = await response.text();
-    return text ? JSON.parse(text) : null;
+    if (!response.ok) {
+      const detail = looksLikeHtml(parsedResponse.contentType, parsedResponse.text)
+        ? null
+        : extractDetail(parsedBody);
+      const fallback = `Request failed with status ${response.status}`;
+      const message = looksLikeHtml(parsedResponse.contentType, parsedResponse.text)
+        ? fallback
+        : formatMessage(detail, fallback);
+      throw new ApiError({
+        status: response.status,
+        url,
+        method,
+        detail,
+        message,
+        responseBody: parsedBody,
+      });
+    }
+
+    return parsedBody;
   } catch (error) {
-    console.error('API request failed:', error);
     throw error;
   }
 }
@@ -49,7 +198,7 @@ export async function api(path, options = {}) {
 export async function apiPost(path, body, options = {}) {
   return api(path, {
     method: 'POST',
-    body: JSON.stringify(body),
+    body,
     ...options,
   });
 }
@@ -57,7 +206,7 @@ export async function apiPost(path, body, options = {}) {
 export async function apiPut(path, body, options = {}) {
   return api(path, {
     method: 'PUT',
-    body: JSON.stringify(body),
+    body,
     ...options,
   });
 }
@@ -125,8 +274,7 @@ export async function getReviewPacket(factoryRunId) {
 }
 
 export async function listReviewPackets(filter = null) {
-  const params = filter ? `?filter=${filter}` : '';
-  return api(`/api/review-packets${params}`);
+  return api(buildApiUrl('/api/review-packets', filter ? { filter } : null));
 }
 
 export async function submitIntervention(factoryRunId, action, rationale = null) {

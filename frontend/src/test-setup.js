@@ -21,9 +21,12 @@ class MockWebSocket {
 global.WebSocket = MockWebSocket;
 
 // Mock FormData
-global.FormData = vi.fn().mockImplementation(() => ({
-  append: vi.fn(),
-}));
+class MockFormData {
+  constructor() {
+    this.append = vi.fn();
+  }
+}
+global.FormData = MockFormData;
 
 // Mock navigator.clipboard
 Object.defineProperty(global.navigator, 'clipboard', {

@@ -26,6 +26,7 @@
   } from '../../api.js';
   import Badge from '../UI/Badge.svelte';
   import Button from '../UI/Button.svelte';
+  import Modal from '../UI/Modal.svelte';
   import ExpertCouncilPanel from './ExpertCouncilPanel.svelte';
 
   let { factoryRunId = '' } = $props();
@@ -597,19 +598,16 @@
 </div>
 
 {#if showRationaleModal}
-  <div class="modal-overlay" onclick={() => { showRationaleModal = false; }}>
-    <div class="modal-box" onclick={(e) => e.stopPropagation()}>
-      <h3>Rationale Required</h3>
-      <p>Why are you {rationaleAction === 'reject' ? 'rejecting' : 'requesting changes for'} this run?</p>
-      <textarea bind:value={rationaleText} rows="4" placeholder="Enter your rationale..."></textarea>
-      <div class="modal-actions">
-        <Button variant="secondary" onclick={() => { showRationaleModal = false; }}>Cancel</Button>
-        <Button variant="primary" onclick={submitRationale} disabled={!rationaleText.trim()}>
-          <Send size={14} /> Submit
-        </Button>
-      </div>
+  <Modal title="Rationale Required" onclose={() => { showRationaleModal = false; }}>
+    <p>Why are you {rationaleAction === 'reject' ? 'rejecting' : 'requesting changes for'} this run?</p>
+    <textarea bind:value={rationaleText} rows="4" placeholder="Enter your rationale..."></textarea>
+    <div class="modal-actions">
+      <Button variant="secondary" onclick={() => { showRationaleModal = false; }}>Cancel</Button>
+      <Button variant="primary" onclick={submitRationale} disabled={!rationaleText.trim()}>
+        <Send size={14} /> Submit
+      </Button>
     </div>
-  </div>
+  </Modal>
 {/if}
 
 <style>
@@ -980,40 +978,25 @@
     font-size: 0.82rem;
   }
 
-  .modal-overlay {
-    align-items: center;
-    background: rgba(0, 0, 0, 0.6);
-    bottom: 0;
+  .modal-actions {
     display: flex;
-    justify-content: center;
-    left: 0;
-    position: fixed;
-    right: 0;
-    top: 0;
-    z-index: 200;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: var(--spacing-md);
   }
 
-  .modal-box {
-    background: rgba(10, 16, 24, 0.98);
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-lg);
-    max-width: 520px;
-    padding: var(--spacing-lg);
-    width: 90%;
-  }
-
-  .modal-box h3 {
+  :global(.modal-content) h3 {
     color: var(--color-text);
     margin: 0 0 8px;
   }
 
-  .modal-box p {
+  :global(.modal-content) p {
     color: var(--color-text-secondary);
     font-size: 0.85rem;
     margin: 0 0 var(--spacing-md);
   }
 
-  .modal-box textarea {
+  :global(.modal-content) textarea {
     background: rgba(4, 9, 14, 0.8);
     border: 1px solid var(--color-border);
     border-radius: var(--border-radius-md);
@@ -1025,16 +1008,9 @@
     resize: vertical;
   }
 
-  .modal-box textarea:focus {
+  :global(.modal-content) textarea:focus {
     outline: none;
     border-color: var(--color-accent);
-  }
-
-  .modal-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    margin-top: var(--spacing-md);
   }
 
   .spin {

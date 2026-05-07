@@ -30,8 +30,10 @@ describe('ChatView', () => {
           ],
         };
       }
-      if (path.includes('/chat/history')) return [];
-      if (path.includes('/phase')) return { current_phase: 'capture', suggested_phase: null };
+      if (path.endsWith('/chat/history')) return [];
+      if (path.endsWith('/phase/suggest')) return { suggested_phase: 'clarify' };
+      if (path.endsWith('/phase')) return { current_phase: 'capture' };
+      if (path.endsWith('/ideas/test-idea')) return { id: 'test-idea', title: 'Test Idea', current_phase: 'capture', scores: [] };
       return { id: 'test-idea', title: 'Test Idea', current_phase: 'capture', scores: [] };
     });
   }
@@ -81,5 +83,17 @@ describe('ChatView', () => {
 
     const textarea = screen.getByRole('textbox');
     expect(textarea).toBeInTheDocument();
+  });
+
+  it('loads phase suggestions from the dedicated suggest endpoint', async () => {
+    mockApiDefaults();
+
+    render(ChatView, { props: { ideaId: 'test-idea' } });
+
+    await vi.waitFor(() => {
+      expect(apiModule.api).toHaveBeenCalledWith('/api/ideas/test-idea/phase/suggest');
+    });
+
+    expect(screen.getByRole('button', { name: /approve/i })).toBeInTheDocument();
   });
 });

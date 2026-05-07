@@ -21,23 +21,42 @@
 
   const ACTIVE_IDEA_KEY = 'idearefinery:activeIdeaId';
 
+  function readStoredIdeaId() {
+    try {
+      return typeof localStorage?.getItem === 'function' ? localStorage.getItem(ACTIVE_IDEA_KEY) || '' : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function writeStoredIdeaId(ideaId) {
+    try {
+      if (typeof localStorage?.setItem === 'function') {
+        localStorage.setItem(ACTIVE_IDEA_KEY, ideaId);
+      }
+    } catch {
+      // Storage may be unavailable in test or private browsing contexts.
+    }
+  }
+
   async function loadActiveIdea() {
     try {
-      const ideas = await api('/api/ideas');
-      const storedIdeaId = localStorage.getItem(ACTIVE_IDEA_KEY) || '';
+      const response = await api('/api/ideas');
+      const ideas = Array.isArray(response) ? response : [];
+      const storedIdeaId = readStoredIdeaId();
       const storedIdea = ideas.find((idea) => idea.id === storedIdeaId);
       const firstIdea = ideas.find((idea) => idea.status !== 'archived') || ideas[0];
       activeIdeaId = storedIdea?.id || firstIdea?.id || '';
     } catch (err) {
       console.error('Failed to load active idea:', err);
-      activeIdeaId = localStorage.getItem(ACTIVE_IDEA_KEY) || '';
+      activeIdeaId = readStoredIdeaId();
     }
   }
 
   function setActiveIdea(ideaId) {
     if (!ideaId) return;
     activeIdeaId = ideaId;
-    localStorage.setItem(ACTIVE_IDEA_KEY, ideaId);
+    writeStoredIdeaId(ideaId);
   }
 
   function parseHash() {

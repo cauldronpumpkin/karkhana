@@ -1,5 +1,5 @@
 <script>
-import { onMount } from 'svelte';
+  import { onMount } from 'svelte';
   import {
     ArrowRight,
     BarChart3,
@@ -76,14 +76,31 @@ import { onMount } from 'svelte';
   let scoreRows = $derived(getScoreRows(idea));
   let compositeScore = $derived(Number(idea?.composite_score || 0));
   let displayScore = $derived(Math.round(compositeScore * 10));
-  let availableScoreCount = $derived((idea?.scores || []).length);
+  let availableScoreCount = $derived(Array.isArray(idea?.scores) ? idea.scores.length : 0);
   let lastUpdatedLabel = $derived(formatUpdatedAt(idea?.updated_at));
+
+  function normalizeArray(value) {
+    return Array.isArray(value) ? value : [];
+  }
+
+  function normalizeIdea(value) {
+    if (!value || typeof value !== 'object') return null;
+    return {
+      ...value,
+      scores: normalizeArray(value.scores),
+    };
+  }
+
+  function normalizePhaseSuggestion(value) {
+    if (!value || typeof value !== 'object') return null;
+    return value.suggested_phase || value.next_phase || value.phase || null;
+  }
 
   // Load chat history
   async function loadHistory() {
     try {
       const response = await api(`/api/ideas/${ideaId}/chat/history`);
-      messages = response.map(msg => ({
+      messages = normalizeArray(response).map(msg => ({
         ...msg,
         timestamp: new Date(msg.timestamp)
       }));
@@ -98,7 +115,7 @@ import { onMount } from 'svelte';
 
     contextStatus = 'loading';
     try {
-      idea = await api(`/api/ideas/${ideaId}`);
+      idea = normalizeIdea(await api(`/api/ideas/${ideaId}`));
       if (idea?.current_phase && !currentPhase) {
         currentPhase = idea.current_phase;
       }
@@ -112,9 +129,9 @@ import { onMount } from 'svelte';
   async function loadAiModels() {
     try {
       const response = await api('/api/ai/models');
-      aiProviders = (response.providers || []).filter(provider => (provider.models || []).length > 0);
+      aiProviders = normalizeArray(response?.providers).filter((provider) => normalizeArray(provider?.models).length > 0);
       const saved = getSavedAiModel();
-      const active = saved || response.active || {};
+      const active = saved || response?.active || {};
       selectModel(active.provider, active.model);
       if (!selectedProvider || !selectedModel) {
         const firstProvider = aiProviders[0];
@@ -207,6 +224,7 @@ import { onMount } from 'svelte';
       await apiPost(`/api/ideas/${ideaId}/phase/approve`);
       if (newPhase) currentPhase = newPhase;
       await loadIdeaContext();
+      await loadPhaseSuggestion();
     } catch (err) {
       console.error('Failed to approve phase:', err);
     }
@@ -219,13 +237,14 @@ import { onMount } from 'svelte';
         reason: data.reason 
       });
       suggestedPhase = null;
+      await loadPhaseSuggestion();
     } catch (err) {
       console.error('Failed to reject phase:', err);
     }
   }
 
   function getScoreRows(ideaData) {
-    const scores = ideaData?.scores || [];
+    const scores = normalizeArray(ideaData?.scores);
 
     return scoreDimensions.map(dimension => {
       const score = scores.find(item => item.dimension === dimension.key);
@@ -260,15 +279,20 @@ import { onMount } from 'svelte';
     await loadAiModels();
     await loadHistory();
     await loadIdeaContext();
-    
-    try {
-      const phaseResponse = await api(`/api/ideas/${ideaId}/phase`);
-      currentPhase = phaseResponse.current_phase;
-      suggestedPhase = phaseResponse.suggested_phase;
-    } catch (err) {
-      console.error('Failed to fetch phase info:', err);
-    }
+    await loadPhaseSuggestion();
   });
+
+  async function loadPhaseSuggestion() {
+    if (!ideaId) return;
+
+    try {
+      const response = await api(`/api/ideas/${ideaId}/phase/suggest`);
+      suggestedPhase = normalizePhaseSuggestion(response);
+    } catch (err) {
+      console.error('Failed to fetch phase suggestion:', err);
+      suggestedPhase = null;
+    }
+  }
 
 </script>
 

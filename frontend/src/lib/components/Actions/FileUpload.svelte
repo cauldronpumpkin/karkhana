@@ -1,7 +1,7 @@
 <script>
   import { CheckCircle2, FileText, Loader2, UploadCloud, XCircle } from 'lucide-svelte';
   import Button from '../UI/Button.svelte';
-  import { API_BASE } from '../../api.js';
+  import { api, buildApiUrl } from '../../api.js';
 
   let { ideaId, task, onclose, onuploaded } = $props();
 
@@ -46,6 +46,10 @@
     fileInput?.click();
   }
 
+  function uploadErrorMessage(error) {
+    return error?.detail || error?.message || 'Upload failed. Please try again.';
+  }
+
   const handleFile = async (file) => {
     const validTypes = ['.md', '.txt', '.markdown'];
     const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
@@ -65,21 +69,15 @@
     formData.append('file', file);
 
     try {
-      const response = await fetch(
-        `${API_BASE}/api/ideas/${ideaId}/research/${task.id}/upload`,
-        { method: 'POST', body: formData }
-      );
-      
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.detail || 'Upload failed');
-      }
-      
+      await api(buildApiUrl(`/api/ideas/${ideaId}/research/${task.id}/upload`), {
+        method: 'POST',
+        body: formData,
+      });
       uploadStatus = 'Evidence uploaded successfully.';
       uploadProgress = 100;
       setTimeout(() => onuploaded?.(), 800);
     } catch (error) {
-      uploadError = error.message || 'Upload failed. Please try again.';
+      uploadError = uploadErrorMessage(error);
       console.error('Upload error:', error);
     } finally {
       isUploading = false;

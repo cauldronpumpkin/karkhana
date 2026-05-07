@@ -1,2 +1,2 @@
 // Shim file for test resolution - re-exports from actual API module
-export { api, apiPost, apiPut, apiDelete } from '../api.js';
+export { ApiError, API_BASE, api, apiPost, apiPut, apiDelete, buildApiUrl } from '../api.js';

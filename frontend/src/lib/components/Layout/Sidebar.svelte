@@ -10,6 +10,7 @@
     MessageCircle,
     Plug,
     Settings,
+    ShieldCheck,
     ServerCog,
     TerminalSquare,
     UploadCloud

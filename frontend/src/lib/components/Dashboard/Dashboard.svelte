@@ -19,7 +19,7 @@
   onMount(async () => {
     try {
       const data = await api('/api/ideas');
-      ideas = data;
+      ideas = Array.isArray(data) ? data : [];
     } catch (err) {
       console.error('Failed to load ideas:', err);
       ideas = [];

@@ -1,9 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
 import LocalWorkers from './LocalWorkers.svelte';
+import * as apiModule from '../../api.js';
 
 vi.mock('../../api.js', () => ({
-  API_BASE: '',
+  api: vi.fn(),
+  buildApiUrl: vi.fn((path, query = null, base = '') => {
+    const url = base ? `${base.replace(/\/$/, '')}/${path.replace(/^\/+/, '')}` : path;
+    if (!query) return url;
+
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value === undefined || value === null || value === '') continue;
+      params.set(key, String(value));
+    }
+
+    const search = params.toString();
+    return search ? `${url}?${search}` : url;
+  }),
 }));
 
 const dashboard = {
@@ -98,21 +112,28 @@ const dashboardWithNoJobs = {
   jobs: [],
 };
 
+function mockDashboardApi(response = dashboard) {
+  apiModule.api.mockImplementation(async (path, options = {}) => {
+    if (path === '/api/local-workers' && (!options.method || options.method === 'GET')) {
+      return response;
+    }
+
+    if (path.startsWith('/api/worker/invite-link')) {
+      return { invite_link: 'idearefinery://connect?api_base=http%3A%2F%2Flocalhost' };
+    }
+
+    if (options.method === 'POST') {
+      return {};
+    }
+
+    return {};
+  });
+}
+
 describe('LocalWorkers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    fetch.mockImplementation((url, options = {}) => {
-      if (url === '/api/local-workers' && !options.method) {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve(dashboard) });
-      }
-      if (url.startsWith('/api/worker/invite-link')) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ invite_link: 'idearefinery://connect?api_base=http%3A%2F%2Flocalhost' }),
-        });
-      }
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
-    });
+    mockDashboardApi();
     Object.assign(navigator, { clipboard: { writeText: vi.fn() } });
   });
 
@@ -153,12 +174,7 @@ describe('LocalWorkers', () => {
   });
 
   it('renders an actionable empty state when no worker jobs are queued', async () => {
-    fetch.mockImplementation((url, options = {}) => {
-      if (url === '/api/local-workers' && !options.method) {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve(dashboardWithNoJobs) });
-      }
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
-    });
+    mockDashboardApi(dashboardWithNoJobs);
 
     render(LocalWorkers);
 
@@ -169,18 +185,40 @@ describe('LocalWorkers', () => {
   });
 
   it('renders an actionable error state when the worker dashboard fails to load', async () => {
-    fetch.mockImplementation((url) => {
-      if (url === '/api/local-workers') {
-        return Promise.resolve({ ok: false, status: 503 });
+    apiModule.api.mockImplementation(async (path) => {
+      if (path === '/api/local-workers') {
+        throw new Error('Request failed with status 503');
       }
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+      return {};
     });
 
     render(LocalWorkers);
 
     expect(await screen.findByText('Worker dashboard could not load')).toBeInTheDocument();
-    expect(screen.getByText('HTTP 503')).toBeInTheDocument();
+    expect(screen.getByText('Request failed with status 503')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it('generates invite links through the shared URL builder', async () => {
+    render(LocalWorkers);
+
+    const input = await screen.findByPlaceholderText(/worker id/i);
+    await fireEvent.input(input, { target: { value: 'worker-42' } });
+    await fireEvent.click(screen.getByRole('button', { name: /generate link/i }));
+
+    await waitFor(() => {
+      expect(apiModule.buildApiUrl).toHaveBeenCalledWith(
+        '/api/worker/invite-link',
+        {
+          api_base: window.location.origin,
+          worker_id: 'worker-42',
+        },
+      );
+      expect(apiModule.api).toHaveBeenCalledWith(
+        `/api/worker/invite-link?api_base=${encodeURIComponent(window.location.origin)}&worker_id=worker-42`,
+      );
+      expect(screen.getByText(/idearefinery:\/\/connect/i)).toBeInTheDocument();
+    });
   });
 
   it('approves a worker request', async () => {
@@ -190,9 +228,9 @@ describe('LocalWorkers', () => {
     await fireEvent.click(approveButton);
 
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
+      expect(apiModule.api).toHaveBeenCalledWith(
         '/api/local-workers/requests/request-1/approve',
-        expect.objectContaining({ method: 'POST', body: '{}' })
+        expect.objectContaining({ method: 'POST', body: {} }),
       );
     });
   });
@@ -207,13 +245,13 @@ describe('LocalWorkers', () => {
     await fireEvent.click(revokeButton);
 
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
+      expect(apiModule.api).toHaveBeenCalledWith(
         '/api/local-workers/worker-1/rotate-credentials',
-        expect.objectContaining({ method: 'POST', body: '{}' })
+        expect.objectContaining({ method: 'POST', body: {} }),
       );
-      expect(fetch).toHaveBeenCalledWith(
+      expect(apiModule.api).toHaveBeenCalledWith(
         '/api/local-workers/worker-1/revoke',
-        expect.objectContaining({ method: 'POST', body: '{}' })
+        expect.objectContaining({ method: 'POST', body: {} }),
       );
     });
   });
@@ -225,9 +263,9 @@ describe('LocalWorkers', () => {
     await fireEvent.click(purgeButton);
 
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
+      expect(apiModule.api).toHaveBeenCalledWith(
         '/api/local-workers/purge-revoked',
-        expect.objectContaining({ method: 'POST', body: '{}' })
+        expect.objectContaining({ method: 'POST', body: {} }),
       );
     });
   });

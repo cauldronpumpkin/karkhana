@@ -74,4 +74,13 @@ describe('Dashboard', () => {
     expect(screen.getByText('Average Score')).toBeInTheDocument();
     expect(screen.getByText('Research Pending')).toBeInTheDocument();
   });
+
+  it('renders an empty state when the ideas response is null', async () => {
+    apiModule.api.mockResolvedValue(null);
+    render(Dashboard);
+
+    await waitFor(() => {
+      expect(screen.getByText('No ideas captured yet')).toBeInTheDocument();
+    });
+  });
 });

@@ -3,6 +3,7 @@ name: Worker app build
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -116,3 +117,53 @@ jobs:
           name: worker-app-macos-debug
           path: worker-app/src-tauri/target/release/idearefinery-worker
           if-no-files-found: warn
+
+  release:
+    name: Create Release
+    needs: [windows-build, macos-build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download Windows MSI
+        uses: actions/download-artifact@v4
+        with:
+          name: worker-app-windows-msi
+          path: release-artifacts/
+
+      - name: Download Windows NSIS
+        uses: actions/download-artifact@v4
+        with:
+          name: worker-app-windows-setup
+          path: release-artifacts/
+
+      - name: Download macOS DMG
+        uses: actions/download-artifact@v4
+        with:
+          name: worker-app-macos-dmg
+          path: release-artifacts/
+
+      - name: Generate release body
+        id: body
+        run: |
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "## Worker App ${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### Installers" >> $GITHUB_OUTPUT
+          echo "- **Windows:** \`*.msi\` (Microsoft Installer) and \`*-setup.exe\` (NSIS)" >> $GITHUB_OUTPUT
+          echo "- **macOS:** \`*.dmg\`" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "Built automatically from \`${{ github.sha }}\`" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body: ${{ steps.body.outputs.body }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
+          files: release-artifacts/*
+          fail_on_unmatched: true
+          generate_release_notes: false

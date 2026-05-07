@@ -1,18 +1,21 @@
 version: 1
-frontend:
-  phases:
-    preBuild:
-      commands:
-        - nvm install 20
-        - cd frontend && npm ci
-    build:
-      commands:
-        - cd frontend && echo "VITE_API_BASE_URL=$VITE_API_BASE_URL" > .env.production
-        - cd frontend && npm run build
-  artifacts:
-    baseDirectory: frontend/dist
-    files:
-      - '**/*'
-  cache:
-    paths:
-      - frontend/node_modules/**/*
+applications:
+  - appRoot: frontend
+    frontend:
+      buildPath: /
+      phases:
+        preBuild:
+          commands:
+            - nvm install 20
+            - cd frontend && npm ci
+        build:
+          commands:
+            - cd frontend && echo "VITE_API_BASE_URL=$VITE_API_BASE_URL" > .env.production
+            - cd frontend && npm run build
+      artifacts:
+        baseDirectory: frontend/dist
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - frontend/node_modules/**/*

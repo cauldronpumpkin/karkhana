@@ -1975,7 +1975,6 @@ class DynamoDBRepository(Repository):
             "GSI2SK": f"FRTM#{_iso(manifest.updated_at)}#{manifest.factory_run_id}",
             **manifest.__dict__,
         })
-        self.factory_tracking_manifests[manifest.factory_run_id] = manifest
         return manifest
 
     async def get_factory_run_tracking_manifest(self, run_id: str) -> FactoryRunTrackingManifest | None:
@@ -2354,7 +2353,24 @@ class DynamoDBRepository(Repository):
         return VerificationRun(id=item["id"], factory_batch_id=item["factory_batch_id"], factory_run_id=item["factory_run_id"], verification_type=item["verification_type"], status=item.get("status", "pending"), result_uri=item.get("result_uri"), result_summary=item.get("result_summary", ""), failure_classification=item.get("failure_classification", ""), command_output=item.get("command_output", ""), changed_files=item.get("changed_files") or [], created_at=_dt(item.get("created_at")) or utcnow(), completed_at=_dt(item.get("completed_at")))
 
     def _repair_task(self, item: dict[str, Any]) -> RepairTask:
-        return RepairTask(id=item["id"], factory_run_id=item["factory_run_id"], factory_batch_id=item["factory_batch_id"], failure_classification=item.get("failure_classification", ""), status=item.get("status", "pending"), attempt_number=int(item.get("attempt_number", 1)), command_output=item.get("command_output", ""), recent_diff=item.get("recent_diff", ""), changed_files=item.get("changed_files") or [], acceptance_criteria=item.get("acceptance_criteria") or [], guardrails=item.get("guardrails") or [], issue_summary=item.get("issue_summary", ""), work_item_id=item.get("work_item_id"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow(), completed_at=_dt(item.get("completed_at")))
+        return RepairTask(
+            id=item.get("id", ""),
+            factory_run_id=item.get("factory_run_id", ""),
+            factory_batch_id=item.get("factory_batch_id", ""),
+            failure_classification=item.get("failure_classification", ""),
+            status=item.get("status", "pending"),
+            attempt_number=int(item.get("attempt_number", 1)),
+            command_output=item.get("command_output", ""),
+            recent_diff=item.get("recent_diff", ""),
+            changed_files=item.get("changed_files") or [],
+            acceptance_criteria=item.get("acceptance_criteria") or [],
+            guardrails=item.get("guardrails") or [],
+            issue_summary=item.get("issue_summary", ""),
+            work_item_id=item.get("work_item_id"),
+            created_at=_dt(item.get("created_at")) or utcnow(),
+            updated_at=_dt(item.get("updated_at")) or utcnow(),
+            completed_at=_dt(item.get("completed_at")),
+        )
 
     def _review_packet(self, item: dict[str, Any]) -> ReviewPacket:
         return ReviewPacket(

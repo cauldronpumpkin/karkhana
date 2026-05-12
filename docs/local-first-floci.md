@@ -52,6 +52,8 @@ On Windows machines where the current user cannot register scheduled tasks, the 
 
 Lambda and API Gateway resources remain in Floci as deprecated inventory, but they are not the supported local app path. `local-smoke-test` reports this as `lambda_api_gateway_status=deprecated_unsupported` and then verifies the direct FastAPI/Uvicorn app path, worker-token auth, and frontend serving.
 
+For real AWS resource inventory and deletion, see `docs/aws-retirement.md`.
+
 ## Auth
 
 Do not add `AUTH_DISABLED`, `SKIP_AUTH`, or local auth bypasses. Worker endpoints remain protected. Local smoke testing verifies that `/api/worker/claim` rejects a missing token and accepts `x-idearefinery-worker-token: local-worker-token`.

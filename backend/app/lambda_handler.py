@@ -1,3 +1,14 @@
+"""
+DEPRECATED — Single-Server Migration.
+
+The FastAPI backend now runs as a standalone Uvicorn server on :8000.
+Lambda via API Gateway (Mangum handler) is retained only for historical
+reference and eventual retirement inventory. The supported runtime path
+is ``uvicorn backend.app.main:app`` with Floci for local AWS emulation.
+
+See: docs/local-first-floci.md, docs/aws-retirement.md
+"""
+
 import asyncio
 
 from mangum import Mangum

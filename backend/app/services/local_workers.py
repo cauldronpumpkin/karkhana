@@ -297,7 +297,13 @@ class LocalWorkerService:
                 },
             ],
         }
-        response = boto3.client("sts", region_name=settings.worker_sqs_region).assume_role(
+        from backend.app.aws_endpoints import endpoint_url
+
+        response = boto3.client(
+            "sts",
+            region_name=settings.worker_sqs_region,
+            endpoint_url=endpoint_url("sts"),
+        ).assume_role(
             RoleArn=settings.worker_client_role_arn,
             RoleSessionName=f"idearefinery-worker-{worker.id[:8]}",
             DurationSeconds=max(900, min(settings.worker_credential_ttl_seconds, 43200)),

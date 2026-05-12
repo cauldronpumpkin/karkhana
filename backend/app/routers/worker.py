@@ -62,10 +62,19 @@ class JobFailRequest(JobUpdateRequest):
 async def get_invite_link(
     api_base: str | None = Query(default=None),
     worker_id: str | None = Query(default=None),
+    x_idearefinery_worker_token: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
 ):
-    """Generate an invite link for worker pairing."""
+    """Generate an invite link for worker pairing (requires master token)."""
     if not settings.worker_auth_token:
         raise HTTPException(status_code=503, detail="Worker auth token not configured on server")
+
+    # Require master token — the invite link leaks the token as a query param
+    token = (authorization or "").removeprefix("Bearer ").strip()
+    if not token and x_idearefinery_worker_token:
+        token = x_idearefinery_worker_token
+    if not token or token != settings.worker_auth_token:
+        raise HTTPException(status_code=401, detail="Invalid credentials — master token required")
 
     import urllib.parse
 

@@ -14,6 +14,7 @@
     RefreshCw,
     ShieldCheck,
     Sparkles,
+    Terminal,
     Upload,
     Wrench,
     XCircle
@@ -25,6 +26,7 @@
   import LedgerList from '../Ledger/LedgerList.svelte';
   import LedgerDetail from '../Ledger/LedgerDetail.svelte';
   import LedgerTimeline from '../Ledger/LedgerTimeline.svelte';
+  import RunLog from './RunLog.svelte';
 
   let { factoryRunId = '', autonomyLevel = 'autonomous_development' } = $props();
 
@@ -101,6 +103,7 @@
   const tabOptions = [
     { key: 'run', label: 'Run Details' },
     { key: 'ledger', label: 'Ledger' },
+    { key: 'log', label: 'Live Log' },
   ];
 
   const roleLabels = {
@@ -372,6 +375,7 @@
           onclick={() => activeTab = tab.key}
         >
           {#if tab.key === 'ledger'}<BookOpen size={14} />{/if}
+          {#if tab.key === 'log'}<Terminal size={14} />{/if}
           {tab.label}
         </button>
       {/each}
@@ -394,6 +398,11 @@
           />
         </div>
       {/if}
+    {:else if activeTab === 'log'}
+      <!-- Live Log View -->
+      <section class="log-tab-section">
+        <RunLog factoryRunId={factoryRunId} />
+      </section>
     {:else}
     <!-- Run Details (existing content) -->
 
@@ -829,6 +838,17 @@
     display: flex;
     flex-direction: column;
     gap: var(--spacing-lg);
+  }
+
+  .log-tab-section {
+    display: flex;
+    flex-direction: column;
+    min-height: 400px;
+    height: calc(100vh - 280px);
+  }
+
+  .log-tab-section :global(.run-log) {
+    height: 100%;
   }
 
   .guardrail-banner {

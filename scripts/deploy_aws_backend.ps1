@@ -4,6 +4,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Write-Warning "AWS backend deployment is deprecated for now. Use scripts/local_stack.ps1 for the supported Floci-backed local runtime. This script is retained for history and must not be used without an explicit cloud deployment decision."
 
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $BuildDir = Join-Path $Root ".build\lambda"

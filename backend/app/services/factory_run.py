@@ -1065,6 +1065,13 @@ class FactoryRunService:
         graphify_expectations = dict((factory_run.config or {}).get("graphify_expectations") or template_manifest.get("graphify_expectations") or {})
         path_guardrails = self._normalize_path_guardrails((factory_run.config or {}).get("path_guardrails"), template_manifest)
         resolved_agents_hierarchy = list((factory_run.config or {}).get("resolved_agents_hierarchy") or (template_context or {}).get("resolved_agents") or [])
+        spec_kit_contract = self._build_spec_kit_contract(
+            project=project,
+            template=template,
+            factory_run=factory_run,
+            phase=phase,
+            batch=batch,
+        )
 
         constraints = template.constraints or []
         opencode_worker = template.opencode_worker or {}
@@ -1140,6 +1147,7 @@ class FactoryRunService:
             "quality_gates": quality_gates,
             "deliverables": deliverables,
             "verification_commands": verification_commands,
+            "spec_kit_contract": spec_kit_contract,
             "graphify_instructions": graphify_instructions,
             "ledger_context": worker_context_bundle.get("ledger_context") or {},
             "template_manifest": template_manifest,
@@ -1212,6 +1220,7 @@ class FactoryRunService:
             "template_docs": template_docs,
             "template_version": template.version,
             "template_id": template.template_id,
+            "spec_kit_contract": spec_kit_contract,
             "project_blueprint": project_blueprint,
             "permission_profile": permission_profile,
             "required_capabilities": required_capabilities,
@@ -1220,6 +1229,7 @@ class FactoryRunService:
             "quality_gates": quality_gates,
             "deliverables": deliverables,
             "verification_commands": verification_commands,
+            "spec_kit_contract": spec_kit_contract,
             "graphify_instructions": graphify_instructions,
             "template_manifest": template_manifest,
             "verification_expectations": verification_expectations,
@@ -1232,6 +1242,87 @@ class FactoryRunService:
             "scaffold_manifest": scaffold_manifest,
             "verifier_contract": verifier_contract,
         }
+
+    def _build_spec_kit_contract(
+        self,
+        *,
+        project: ProjectTwin,
+        template: TemplatePack,
+        factory_run: FactoryRun,
+        phase: FactoryPhase,
+        batch: FactoryBatch,
+    ) -> dict[str, Any]:
+        """Build the spec-driven development envelope for cheap worker tasks."""
+        run_config = dict(factory_run.config or {})
+        spec_config = dict(run_config.get("spec_kit") or {})
+        enabled = spec_config.get("enabled", True)
+        feature_slug = self._slugify_spec_segment(
+            str(spec_config.get("feature_slug") or f"{factory_run.id[:8]}-{phase.phase_key}")
+        )
+        feature_dir = str(spec_config.get("feature_dir") or f".specify/specs/{feature_slug}")
+        goal = str(
+            spec_config.get("goal")
+            or run_config.get("goal")
+            or (template.opencode_worker or {}).get("goal")
+            or f"Execute factory phase '{phase.phase_key}' for {project.repo_full_name}"
+        )
+        spec_prompt = (
+            f"Factory run {factory_run.id}, phase {phase.phase_key}, batch {batch.batch_key}: {goal}. "
+            "Capture user-visible behavior, constraints, acceptance criteria, risks, and out-of-scope work. "
+            "Do not choose implementation details in the spec."
+        )
+        plan_prompt = (
+            f"Use the existing {project.repo_full_name} architecture, template {template.template_id}@{template.version}, "
+            "Graphify context, path guardrails, and local-first Floci runtime. Keep heavy execution on local workers."
+        )
+        tasks_prompt = (
+            "Break the plan into cheap-agent-sized tasks with disjoint write scopes, verification commands, "
+            "graphify update requirements, and explicit stop conditions."
+        )
+        artifacts = {
+            "feature_dir": feature_dir,
+            "spec": f"{feature_dir}/spec.md",
+            "plan": f"{feature_dir}/plan.md",
+            "tasks": f"{feature_dir}/tasks.md",
+        }
+        return {
+            "enabled": bool(enabled),
+            "source": "https://github.com/github/spec-kit",
+            "purpose": "Use Spec Kit's spec-driven workflow as the planning envelope before cheap AI model implementation.",
+            "integration": str(spec_config.get("integration") or "codex"),
+            "feature_slug": feature_slug,
+            "artifacts": artifacts,
+            "lifecycle": [
+                {"phase": "specify", "command": "/speckit.specify", "prompt": spec_prompt, "writes": [artifacts["spec"]]},
+                {"phase": "plan", "command": "/speckit.plan", "prompt": plan_prompt, "writes": [artifacts["plan"]]},
+                {"phase": "tasks", "command": "/speckit.tasks", "prompt": tasks_prompt, "writes": [artifacts["tasks"]]},
+                {"phase": "implement", "command": "/speckit.implement", "prompt": "Execute only the current Karkhana batch scope.", "reads": [artifacts["spec"], artifacts["plan"], artifacts["tasks"]]},
+            ],
+            "cheap_model_routing": {
+                "planner": "gpt-5.4-mini",
+                "implementation": "gpt-5.4-mini",
+                "exploration": "deepseek-v4-flash",
+                "review": "deepseek-v4-flash",
+            },
+            "worker_requirements": [
+                "Create or update the Spec Kit artifacts before code edits when enabled.",
+                "Keep specs product-behavior focused and plans implementation-focused.",
+                "Translate tasks into Karkhana worker batches with disjoint write scopes where possible.",
+                "Report spec, plan, and tasks paths in phase_artifacts.",
+            ],
+        }
+
+    def _slugify_spec_segment(self, value: str) -> str:
+        cleaned = []
+        last_dash = False
+        for char in value.lower():
+            if char.isalnum():
+                cleaned.append(char)
+                last_dash = False
+            elif not last_dash:
+                cleaned.append("-")
+                last_dash = True
+        return "".join(cleaned).strip("-") or "factory-task"
 
     async def _collect_template_docs(self, repo: Any, template_id: str) -> list[dict[str, str]]:
         artifacts = await repo.list_template_artifacts(template_id)

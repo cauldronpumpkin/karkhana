@@ -5,6 +5,12 @@ from pathlib import Path
 
 import pytest
 
+from karigar.auto_repair import (
+    AutoRepairEngine,
+    FailureClass,
+    RepairAction,
+    RepairAttempt,
+)
 from karigar.commands import RealEnginePolicy, SafeCommandPolicy
 from karigar.engines import (
     HermesAgentEngine,
@@ -667,3 +673,237 @@ def test_job_contract_engine_config_empty() -> None:
     })
     assert contract.engine_config_value("priority") == "high"
     assert contract.engine_config_value("missing") is None
+
+
+# ---------------------------------------------------------------------------
+# Test 13: Auto-Repair — pass-first-time (no repair needed)
+# ---------------------------------------------------------------------------
+
+
+def test_auto_repair_pass_first_time() -> None:
+    """When the first run succeeds, auto-repair performs no retries."""
+    engine = AutoRepairEngine(max_retries=3)
+
+    call_count = {"count": 0}
+
+    def run_job(job_data: dict) -> JobResult:
+        call_count["count"] += 1
+        return JobResult(
+            job_id=str(job_data.get("job_id", "")),
+            status=JobStatus.SUCCESS,
+            summary="Passed on first attempt",
+            engine_used="mock",
+        )
+
+    job_data = {"job_id": "test-pass-first", "task_prompt": "do stuff"}
+    result, history = engine.execute_with_repair(job_data, run_job)
+
+    assert result.status == JobStatus.SUCCESS
+    assert result.summary == "Passed on first attempt"
+    assert len(history) == 1
+    assert history[0].attempt == 0
+    assert history[0].status == "success"
+    assert call_count["count"] == 1  # no retry needed
+
+
+# ---------------------------------------------------------------------------
+# Test 14: Auto-Repair — repair succeeds on retry
+# ---------------------------------------------------------------------------
+
+
+def test_auto_repair_succeeds_on_retry() -> None:
+    """When the first attempt fails but the second succeeds, repair works."""
+    engine = AutoRepairEngine(max_retries=3)
+
+    call_count = {"count": 0}
+
+    def run_job(job_data: dict) -> JobResult:
+        call_count["count"] += 1
+        if call_count["count"] == 1:
+            return JobResult(
+                job_id=str(job_data.get("job_id", "")),
+                status=JobStatus.FAILED,
+                summary="First attempt failed",
+                engine_used="opencode",
+                failure_reason="verification_failed",
+                verification_results=[
+                    {
+                        "command": "pytest tests/",
+                        "status": "failed",
+                        "summary": "AssertionError: expected 2 got 3",
+                        "stdout": "",
+                        "stderr": "AssertionError: expected 2 got 3",
+                        "exit_code": 1,
+                        "duration_seconds": 1.0,
+                    }
+                ],
+            )
+        # Second call: success
+        return JobResult(
+            job_id=str(job_data.get("job_id", "")),
+            status=JobStatus.SUCCESS,
+            summary="Fixed on retry",
+            engine_used="opencode",
+        )
+
+    job_data = {"job_id": "test-repair-wins", "task_prompt": "fix the tests"}
+    result, history = engine.execute_with_repair(job_data, run_job)
+
+    assert result.status == JobStatus.SUCCESS
+    assert result.summary == "Fixed on retry"
+    assert len(history) == 2
+    assert history[0].attempt == 0
+    assert history[0].status == "failed"
+    assert history[0].strategy == "retry_with_diagnostics"
+    assert history[1].attempt == 1
+    assert history[1].status == "success"
+    assert history[1].strategy == ""  # success entries have no strategy
+    # Verify diagnostic was injected
+    assert "[Auto-Repair]" in str(job_data.get("task_prompt", ""))
+
+
+# ---------------------------------------------------------------------------
+# Test 15: Auto-Repair — exhausts retries and escalates
+# ---------------------------------------------------------------------------
+
+
+def test_auto_repair_exhausts_retries() -> None:
+    """When all repair attempts fail, the engine escalates to terminal failure."""
+    engine = AutoRepairEngine(max_retries=2)  # smaller budget for faster test
+
+    call_count = {"count": 0}
+
+    def run_job(job_data: dict) -> JobResult:
+        call_count["count"] += 1
+        return JobResult(
+            job_id=str(job_data.get("job_id", "")),
+            status=JobStatus.FAILED,
+            summary=f"Attempt {call_count['count']} failed",
+            engine_used="opencode",
+            failure_reason="verification_failed",
+            verification_results=[
+                {
+                    "command": "pytest tests/",
+                    "status": "failed",
+                    "summary": "test failure",
+                    "stdout": "",
+                    "stderr": "FAILED test_something",
+                    "exit_code": 1,
+                    "duration_seconds": 1.0,
+                }
+            ],
+        )
+
+    job_data = {"job_id": "test-exhausted", "task_prompt": "do the impossible"}
+    result, history = engine.execute_with_repair(job_data, run_job)
+
+    # Should be 3 total runs: initial + 2 retries = max_retries + 1
+    assert result.status == JobStatus.FAILED
+    assert len(history) == 3
+    assert call_count["count"] == 3
+
+    # Verify escalation error is annotated
+    assert result.error is not None
+    assert "Auto-repair exhausted" in (result.error or "")
+
+    # History should show escalation on final entry
+    last_entry = history[-1]
+    assert last_entry.strategy in ("escalate", "retry_same")
+    assert last_entry.attempt == 2
+
+
+# ---------------------------------------------------------------------------
+# Test 16: Auto-Repair — classification logic
+# ---------------------------------------------------------------------------
+
+
+def test_auto_repair_classify_failure() -> None:
+    """FailureClass correctly classifies different result scenarios."""
+    engine = AutoRepairEngine(max_retries=3)
+
+    # Test failure
+    assert (
+        engine.classify_failure(
+            {
+                "status": "failed",
+                "verification_results": [
+                    {
+                        "command": "pytest tests/",
+                        "status": "failed",
+                        "stderr": "FAILED",
+                        "stdout": "",
+                    }
+                ],
+            }
+        )
+        == FailureClass.TEST_FAILURE
+    )
+
+    # Compile error
+    assert (
+        engine.classify_failure(
+            {
+                "status": "failed",
+                "verification_results": [
+                    {
+                        "command": "python -c 'import module'",
+                        "status": "failed",
+                        "stderr": "SyntaxError: invalid syntax",
+                        "stdout": "",
+                    }
+                ],
+            }
+        )
+        == FailureClass.COMPILE_ERROR
+    )
+
+    # Timeout
+    assert (
+        engine.classify_failure({"status": "timed_out", "failure_reason": "timeout"})
+        == FailureClass.TIMEOUT
+    )
+
+    # Review rejection
+    assert (
+        engine.classify_failure(
+            {"status": "failed", "failure_reason": "review_rejection: needs work"}
+        )
+        == FailureClass.REVIEW_REJECTION
+    )
+
+    # Unknown
+    assert (
+        engine.classify_failure(
+            {"status": "failed", "failure_reason": "something weird happened"}
+        )
+        == FailureClass.UNKNOWN
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 17: Auto-Repair — blocked/cancelled are never retried
+# ---------------------------------------------------------------------------
+
+
+def test_auto_repair_skips_blocked_and_cancelled() -> None:
+    """Blocked and Cancelled statuses exit immediately without retry."""
+    engine = AutoRepairEngine(max_retries=3)
+
+    call_count = {"count": 0}
+
+    def run_job(job_data: dict) -> JobResult:
+        call_count["count"] += 1
+        return JobResult(
+            job_id=str(job_data.get("job_id", "")),
+            status=JobStatus.BLOCKED,
+            summary="Blocked by policy",
+            blocked_reason="unsafe_command",
+        )
+
+    job_data = {"job_id": "test-blocked", "task_prompt": "rm -rf /"}
+    result, history = engine.execute_with_repair(job_data, run_job)
+
+    assert result.status == JobStatus.BLOCKED
+    assert len(history) == 1
+    assert call_count["count"] == 1  # no retry for blocked
+    assert history[0].status == "blocked"

@@ -345,5 +345,10 @@ async def test_phase_advancement_enqueues_work_item_with_factory_payload(repo):
     assert next_item.payload["role_prompt"].startswith("Role: Worker")
     assert next_item.payload["role_prompt_template"].startswith("Role: Worker")
     assert next_item.payload["role_output_schema"]["type"] == "object"
+    assert next_item.payload["spec_kit_contract"]["enabled"] is True
+    assert next_item.payload["spec_kit_contract"]["source"] == "https://github.com/github/spec-kit"
+    assert next_item.payload["spec_kit_contract"]["artifacts"]["spec"].endswith("/spec.md")
+    assert next_item.payload["spec_kit_contract"]["cheap_model_routing"]["implementation"] == "gpt-5.4-mini"
+    assert "spec_kit_contract" in next_item.payload["role_prompt"]
     assert next_item.payload["verifier_contract"]["role"] == "verifier"
     assert next_item.priority == 60

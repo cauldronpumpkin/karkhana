@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import inspect
+import json
 import os
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from decimal import Decimal
 from typing import Any
 
@@ -1228,14 +1231,173 @@ class InMemoryRepository(Repository):
         return sorted(packets, key=lambda p: p.created_at, reverse=True)
 
 
+class JsonFileRepository(InMemoryRepository):
+    """Durable local repository for the Windows local-first runtime."""
+
+    _collection_types = {
+        "ideas": Idea,
+        "scores": Score,
+        "messages": Message,
+        "memories": ProjectMemory,
+        "phase_records": PhaseRecord,
+        "research": ResearchTask,
+        "reports": Report,
+        "relationships": IdeaRelationship,
+        "github_installations": GitHubInstallation,
+        "intents": Intent,
+        "project_twins": ProjectTwin,
+        "code_indexes": CodeIndexArtifact,
+        "research_artifacts": ResearchArtifact,
+        "work_items": WorkItem,
+        "agent_runs": AgentRun,
+        "project_commits": ProjectCommit,
+        "local_workers": LocalWorker,
+        "worker_requests": WorkerConnectionRequest,
+        "worker_leases": WorkerCredentialLease,
+        "worker_events": WorkerEvent,
+        "template_packs": TemplatePack,
+        "template_artifacts": TemplateArtifact,
+        "template_manifests": TemplateManifest,
+        "template_memories": TemplateMemory,
+        "template_update_proposals": TemplateUpdateProposal,
+        "factory_tracking_manifests": FactoryRunTrackingManifest,
+        "factory_runs": FactoryRun,
+        "factory_phases": FactoryPhase,
+        "factory_batches": FactoryBatch,
+        "verification_runs": VerificationRun,
+        "repair_tasks": RepairTask,
+        "review_packets": ReviewPacket,
+    }
+
+    _mutating_methods = {
+        name
+        for name, value in InMemoryRepository.__dict__.items()
+        if inspect.iscoroutinefunction(value)
+        and (
+            name.startswith(("create_", "save_", "add_", "put_", "upsert_", "delete_"))
+            or name in {"enqueue_work_item"}
+        )
+    }
+
+    def __init__(self, path: str | os.PathLike[str]) -> None:
+        super().__init__()
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._loading = True
+        try:
+            self._load()
+        finally:
+            self._loading = False
+
+    def __getattribute__(self, name: str):
+        attr = super().__getattribute__(name)
+        if name in super().__getattribute__("_mutating_methods") and inspect.ismethod(attr):
+            async def persisted(*args, **kwargs):
+                result = await attr(*args, **kwargs)
+                if not super(JsonFileRepository, self).__getattribute__("_loading"):
+                    super(JsonFileRepository, self).__getattribute__("_save")()
+                return result
+            return persisted
+        return attr
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
+        data = json.loads(self.path.read_text(encoding="utf-8"))
+        for collection, item_type in self._collection_types.items():
+            for raw in data.get(collection, []):
+                item = self._item_from_json(item_type, raw)
+                self._store_loaded(collection, item)
+
+    def _save(self) -> None:
+        data = {}
+        for collection in self._collection_types:
+            raw_collection = getattr(self, collection)
+            if isinstance(raw_collection, dict):
+                values = []
+                for value in raw_collection.values():
+                    if isinstance(value, list):
+                        values.extend(value)
+                    else:
+                        values.append(value)
+            else:
+                values = list(raw_collection)
+            data[collection] = [self._item_to_json(item) for item in values]
+        temp = self.path.with_suffix(self.path.suffix + ".tmp")
+        temp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        temp.replace(self.path)
+
+    def _item_to_json(self, item: Any) -> dict[str, Any]:
+        return _clean_for_dynamo(asdict(item))
+
+    def _item_from_json(self, item_type: type, raw: dict[str, Any]) -> Any:
+        cleaned = _clean_from_dynamo(raw)
+        for field_info in getattr(item_type, "__dataclass_fields__", {}).values():
+            if (
+                field_info.name in cleaned
+                and (field_info.name.endswith("_at") or field_info.name in {"timestamp", "scored_at", "run_after"})
+            ):
+                cleaned[field_info.name] = _dt(cleaned[field_info.name])
+        if item_type is ResearchArtifact and isinstance(cleaned.get("artifact_metadata"), dict):
+            metadata = cleaned["artifact_metadata"]
+            if "created_at" in metadata:
+                metadata["created_at"] = _dt(metadata["created_at"])
+            cleaned["artifact_metadata"] = ArtifactMetadata(**metadata)
+        return item_type(**cleaned)
+
+    def _store_loaded(self, collection: str, item: Any) -> None:
+        if collection in {"phase_records", "relationships"}:
+            getattr(self, collection).append(item)
+        elif collection == "scores":
+            self.scores[(item.idea_id, item.dimension)] = item
+        elif collection == "messages":
+            self.messages.setdefault(item.idea_id, []).append(item)
+        elif collection == "memories":
+            self.memories[(item.idea_id, item.key)] = item
+        elif collection == "research":
+            self.research[(item.idea_id, item.id)] = item
+        elif collection == "reports":
+            self.reports[(item.idea_id, item.phase)] = item
+        elif collection == "intents":
+            self.intents[(item.idea_id, item.id)] = item
+            self.intents_by_project[(item.project_id, item.id)] = item
+        elif collection == "project_twins":
+            self.project_twins[item.idea_id] = item
+        elif collection == "code_indexes":
+            self.code_indexes.setdefault(item.idea_id, []).append(item)
+        elif collection == "research_artifacts":
+            self.research_artifacts[(item.factory_run_id, item.id)] = item
+        elif collection == "worker_leases":
+            self.worker_leases[item.worker_id] = item
+        elif collection == "template_artifacts":
+            self.template_artifacts[(item.template_id, item.artifact_key)] = item
+        elif collection == "template_manifests":
+            self.template_manifests[(item.template_id, item.version)] = item
+        elif collection == "template_memories":
+            self.template_memories[(item.template_id, item.key)] = item
+        elif collection == "factory_tracking_manifests":
+            self.factory_tracking_manifests[item.factory_run_id] = item
+        elif collection == "review_packets":
+            self.review_packets[item.id] = item
+            self.review_packets_by_run[item.run_id] = item
+        else:
+            getattr(self, collection)[item.id] = item
+
+
 class DynamoDBRepository(Repository):
     def __init__(self, table_name: str, region_name: str = "us-east-1") -> None:
         import boto3
         from boto3.dynamodb.conditions import Key
 
+        from backend.app.aws_endpoints import endpoint_url
+
         self._Key = Key
         self.table_name = table_name
-        self.table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
+        self.table = boto3.resource(
+            "dynamodb",
+            region_name=region_name,
+            endpoint_url=endpoint_url("dynamodb"),
+        ).Table(table_name)
 
     def _put(self, item: dict[str, Any]) -> None:
         self.table.put_item(Item=_clean_for_dynamo(item))
@@ -1253,6 +1415,8 @@ class DynamoDBRepository(Repository):
             if not last_key:
                 break
             kwargs["ExclusiveStartKey"] = last_key
+        if prefix:
+            items = [item for item in items if str(item.get("SK", "")).startswith(prefix)]
         return items
 
     async def create_idea(self, idea: Idea) -> Idea:
@@ -2238,6 +2402,10 @@ def get_repository() -> Repository:
         _repo = DynamoDBRepository(
             table_name=os.environ["DYNAMODB_TABLE_NAME"],
             region_name=os.getenv("AWS_REGION", "us-east-1"),
+        )
+    elif storage in {"json", "local", "local-json"}:
+        _repo = JsonFileRepository(
+            os.getenv("IDEAREFINERY_LOCAL_DB_PATH", ".local/idearefinery-db.json")
         )
     else:
         _repo = InMemoryRepository()

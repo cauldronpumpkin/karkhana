@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Pay-per-use Idea Refinery backend on Lambda, HTTP API, and DynamoDB.
+Description: DEPRECATED for active runtime. Historical AWS backend on Lambda, HTTP API, and DynamoDB; use scripts/local_stack.ps1 with Floci for the supported local-first stack.
 
 Parameters:
   StageName:

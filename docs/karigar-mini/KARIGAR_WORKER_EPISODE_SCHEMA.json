@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://idearefinery.local/schemas/karigar-worker-episode.schema.json",
+  "title": "Karigar Worker Episode",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "episode_id",
+    "episode_type",
+    "source",
+    "task_title",
+    "user_request",
+    "project_context",
+    "repo_context",
+    "constraints",
+    "available_tools",
+    "expected_behavior",
+    "actions",
+    "patches_or_change_summary",
+    "verification",
+    "final_response",
+    "quality_label",
+    "rejection_reasons",
+    "escalation_reason",
+    "privacy_notes",
+    "metadata"
+  ],
+  "properties": {
+    "episode_id": {
+      "type": "string",
+      "minLength": 8
+    },
+    "episode_type": {
+      "type": "string",
+      "enum": [
+        "worker_execution_success",
+        "worker_execution_failure",
+        "cloud_rescue",
+        "repo_inspection_plan",
+        "test_failure_triage",
+        "architecture_guardrail_review",
+        "final_worker_report",
+        "escalation_decision"
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["origin", "synthetic", "generated_by"],
+      "properties": {
+        "origin": { "type": "string" },
+        "synthetic": { "type": "boolean" },
+        "generated_by": { "type": "string" },
+        "repo_snapshot": { "type": "string" },
+        "notes": { "type": "string" }
+      }
+    },
+    "task_title": { "type": "string", "minLength": 3 },
+    "user_request": { "type": "string", "minLength": 3 },
+    "project_context": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["project", "worker_role", "runtime_boundary"],
+      "properties": {
+        "project": { "type": "string" },
+        "worker_role": { "type": "string" },
+        "runtime_boundary": { "type": "string" },
+        "karkhana_concepts": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "repo_context": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["relevant_areas", "files_or_modules", "graphify_notes"],
+      "properties": {
+        "relevant_areas": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "files_or_modules": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "graphify_notes": { "type": "string" }
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "available_tools": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "expected_behavior": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["step", "kind", "description", "result"],
+        "properties": {
+          "step": { "type": "integer", "minimum": 1 },
+          "kind": {
+            "type": "string",
+            "enum": ["inspect", "plan", "edit", "verify", "report", "escalate", "review"]
+          },
+          "description": { "type": "string" },
+          "result": { "type": "string" }
+        }
+      }
+    },
+    "patches_or_change_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changed", "summary", "files"],
+      "properties": {
+        "changed": { "type": "boolean" },
+        "summary": { "type": "string" },
+        "files": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "commands", "evidence", "not_run_reason"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "not_run", "partial"]
+        },
+        "commands": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "evidence": { "type": "string" },
+        "not_run_reason": { "type": "string" }
+      }
+    },
+    "final_response": { "type": "string" },
+    "quality_label": {
+      "type": "string",
+      "enum": ["accept", "needs_review", "reject"]
+    },
+    "rejection_reasons": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "escalation_reason": { "type": "string" },
+    "privacy_notes": { "type": "string" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "difficulty": {
+          "type": "string",
+          "enum": ["easy", "medium", "hard"]
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "created_for": { "type": "string" }
+      }
+    }
+  }
+}
+

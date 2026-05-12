@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.app.config import settings
 from backend.app.services.local_workers import DEFAULT_CAPABILITIES, LocalWorkerService
 
 router = APIRouter(prefix="/api/local-workers", tags=["local-workers"])
@@ -15,6 +16,19 @@ def get_service() -> LocalWorkerService:
     if _service is None:
         _service = LocalWorkerService()
     return _service
+
+
+async def verify_admin(authorization: str | None = Header(default=None)) -> None:
+    """Require the master worker auth token (IDEAREFINERY_WORKER_AUTH_TOKEN) for admin endpoints.
+
+    When the token is not configured (empty string), admin auth is disabled —
+    matching the behaviour of ``verify_worker`` in the worker router.
+    """
+    if not settings.worker_auth_token:
+        return  # admin auth not configured — skip
+    token = (authorization or "").removeprefix("Bearer ").strip()
+    if not token or token != settings.worker_auth_token:
+        raise HTTPException(status_code=401, detail="Invalid admin credentials")
 
 
 class WorkerRegisterRequest(BaseModel):
@@ -50,17 +64,17 @@ async def get_registration(request_id: str, pairing_token: str = ""):
 
 
 @router.get("")
-async def list_workers():
+async def list_workers(_: None = Depends(verify_admin)):
     return await get_service().dashboard()
 
 
 @router.get("/requests")
-async def list_requests():
+async def list_requests(_: None = Depends(verify_admin)):
     return await get_service().list_requests()
 
 
 @router.post("/requests/{request_id}/approve")
-async def approve_request(request_id: str):
+async def approve_request(request_id: str, _: None = Depends(verify_admin)):
     try:
         return await get_service().approve_request(request_id)
     except ValueError as exc:
@@ -68,7 +82,7 @@ async def approve_request(request_id: str):
 
 
 @router.post("/requests/{request_id}/deny")
-async def deny_request(request_id: str, body: DenyRequest | None = None):
+async def deny_request(request_id: str, body: DenyRequest | None = None, _: None = Depends(verify_admin)):
     try:
         return await get_service().deny_request(request_id, body.reason if body else "")
     except ValueError as exc:
@@ -76,7 +90,7 @@ async def deny_request(request_id: str, body: DenyRequest | None = None):
 
 
 @router.post("/{worker_id}/revoke")
-async def revoke_worker(worker_id: str):
+async def revoke_worker(worker_id: str, _: None = Depends(verify_admin)):
     try:
         return await get_service().revoke_worker(worker_id)
     except ValueError as exc:
@@ -84,12 +98,12 @@ async def revoke_worker(worker_id: str):
 
 
 @router.post("/purge-revoked")
-async def purge_revoked_workers():
+async def purge_revoked_workers(_: None = Depends(verify_admin)):
     return await get_service().purge_revoked_workers()
 
 
 @router.post("/{worker_id}/rotate-credentials")
-async def rotate_credentials(worker_id: str):
+async def rotate_credentials(worker_id: str, _: None = Depends(verify_admin)):
     try:
         return await get_service().rotate_credentials(worker_id)
     except ValueError as exc:

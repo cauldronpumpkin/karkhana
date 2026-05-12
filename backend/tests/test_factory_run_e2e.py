@@ -299,8 +299,11 @@ class TestFactoryRunE2E:
         # credentials are not configured the endpoint returns 500.
         # In that case we skip rather than fail.
         ledger_resp = await test_client.get(f"/api/ledgers/{run_id}")
-        if ledger_resp.status_code == 500 and "credentials" in ledger_resp.text.lower():
-            pytest.skip("DynamoDB credentials not available -- ledger endpoint unavailable")
+        if ledger_resp.status_code == 500 and (
+            "credentials" in ledger_resp.text.lower()
+            or "resourcenotfoundexception" in ledger_resp.text.lower()
+        ):
+            pytest.skip("DynamoDB ledger resource unavailable")
         assert ledger_resp.status_code == 200, ledger_resp.text
         ledgers = ledger_resp.json().get("ledgers", [])
         assert isinstance(ledgers, list), f"Expected ledgers to be a list, got {type(ledgers)}"

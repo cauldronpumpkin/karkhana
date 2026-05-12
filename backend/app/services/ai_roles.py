@@ -127,6 +127,8 @@ Deliverables:
 - Implement the phase goal: {goal}
 - Run verification commands: {verification_commands}
 - Run graphify update . after code changes.
+Spec Kit:
+- Follow the spec_kit_contract when present: draft/update the spec, plan, and tasks artifacts before implementation, then report their paths in phase_artifacts.
 Context:
 - project: {project}
 - template: {template}
@@ -136,6 +138,7 @@ Context:
 - constraints: {constraints}
 - quality_gates: {quality_gates}
 - deliverables: {deliverables}
+- spec_kit_contract: {spec_kit_contract}
 - graphify_instructions: {graphify_instructions}
 Factory Run Ledger:
 - Context: {ledger_context}
@@ -159,6 +162,7 @@ Output must match schema: {output_schema}""",
             "constraints",
             "quality_gates",
             "deliverables",
+            "spec_kit_contract",
             "verification_commands",
             "graphify_instructions",
             "ledger_context",

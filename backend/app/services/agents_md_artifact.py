@@ -7,6 +7,7 @@ of copying one-off prompt text everywhere.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,15 @@ from backend.app.services.project_twin import to_jsonable
 DEFAULT_AGENTS_MD_PATH = Path("AGENTS.md")
 DEFAULT_ARTIFACT_KEY = "AGENTS.md"
 DEFAULT_CONTENT_TYPE = "text/markdown"
+
+
+def _version_sort_key(artifact: TemplateArtifact) -> tuple[tuple[int | str, ...], Any]:
+    parts: list[int | str] = []
+    for part in re.split(r"([0-9]+)", artifact.version):
+        if not part:
+            continue
+        parts.append(int(part) if part.isdigit() else part)
+    return tuple(parts), artifact.created_at
 
 
 class AgentsMdArtifactService:
@@ -89,14 +99,14 @@ class AgentsMdArtifactService:
             key = self._versioned_key(version)
             found = next((a for a in agents_artifacts if a.artifact_key == key), None)
             return self._normalize_key(found) if found else None
-        return self._normalize_key(max(agents_artifacts, key=lambda a: a.created_at))
+        return self._normalize_key(max(agents_artifacts, key=_version_sort_key))
 
     async def list_versions(self, template_id: str) -> list[dict[str, Any]]:
         """List all stored AGENTS.md versions for a template pack."""
         all_artifacts = await self._repo.list_template_artifacts(template_id)
         agents_artifacts = sorted(
             [a for a in all_artifacts if a.artifact_key.startswith(f"{DEFAULT_ARTIFACT_KEY}#")],
-            key=lambda a: a.created_at,
+            key=_version_sort_key,
             reverse=True,
         )
         return [

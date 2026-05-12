@@ -76,7 +76,7 @@
 
   async function fetchHealth() {
     try {
-      const data = await invoke('get_health_command')
+      const data = await invoke('get_app_health')
       updateHealth(data)
     } catch {
       // health endpoint may not be available yet — degrade gracefully

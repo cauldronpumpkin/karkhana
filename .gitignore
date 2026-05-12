@@ -7,6 +7,7 @@ frontend/dist/
 .venv/
 *.egg-info/
 .build/
+.local/
 .pytest_cache/
 .svelte-kit/
 test-results/
@@ -17,3 +18,10 @@ litellm.pid
 graphify-out/cache/
 node/bin/
 artifacts/
+# Karigar-Mini local dataset artifacts
+docs/karigar-mini/*.jsonl
+docs/karigar-mini/generated/
+docs/karigar-mini/candidates/
+docs/karigar-mini/accepted/
+docs/karigar-mini/rejected/
+docs/karigar-mini/training/

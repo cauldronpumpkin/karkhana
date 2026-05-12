@@ -460,8 +460,14 @@ class DynamoDBLedgerService:
     ) -> None:
         import boto3
 
+        from backend.app.aws_endpoints import endpoint_url
+
         self.table_name = table_name or os.environ.get("DYNAMODB_TABLE_NAME", "IdeaRefinery")
-        self.table = boto3.resource("dynamodb", region_name=region_name).Table(self.table_name)
+        self.table = boto3.resource(
+            "dynamodb",
+            region_name=region_name,
+            endpoint_url=endpoint_url("dynamodb"),
+        ).Table(self.table_name)
         self._region = region_name
 
     def _ledger_id(self) -> str:
@@ -572,7 +578,13 @@ def _get_ledger_s3_bucket() -> str:
 def _get_s3_client():
     import boto3
 
-    return boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+    from backend.app.aws_endpoints import endpoint_url
+
+    return boto3.client(
+        "s3",
+        region_name=os.environ.get("AWS_REGION", "us-east-1"),
+        endpoint_url=endpoint_url("s3"),
+    )
 
 
 def store_ledger_body(ledger_id: str, run_id: str, body_text: str) -> str:

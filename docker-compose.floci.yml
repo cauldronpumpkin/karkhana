@@ -1,0 +1,15 @@
+services:
+  floci:
+    image: floci/floci:latest
+    container_name: idearefinery-floci
+    ports:
+      - "4566:4566"
+    environment:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: ap-south-1
+      FLOCI_STORAGE_MODE: hybrid
+      FLOCI_STORAGE_PERSISTENT_PATH: /app/data
+    volumes:
+      - ./data/floci:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock

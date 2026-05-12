@@ -18,6 +18,11 @@ from backend.app.repository import (
 
 
 async def _approved_worker(test_client: AsyncClient, *, engine: str = "openclaude", config: dict | None = None):
+    from backend.app.config import settings
+
+    _admin = {}
+    if settings.worker_auth_token:
+        _admin = {"Authorization": f"Bearer {settings.worker_auth_token}"}
     registered = await test_client.post(
         "/api/local-workers/register",
         json={
@@ -30,7 +35,7 @@ async def _approved_worker(test_client: AsyncClient, *, engine: str = "openclaud
         },
     )
     request_id = registered.json()["request"]["id"]
-    approved = await test_client.post(f"/api/local-workers/requests/{request_id}/approve")
+    approved = await test_client.post(f"/api/local-workers/requests/{request_id}/approve", headers=_admin)
     return approved.json()["worker"], approved.json()["credentials"]
 
 

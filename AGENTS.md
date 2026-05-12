@@ -7,6 +7,43 @@ Rules:
 - If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
 - After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)
 
+## Local-first runtime / Floci safety
+
+This repo's supported local runtime uses Floci at `http://localhost:4566` plus a local Uvicorn backend that serves the built frontend. Use `scripts/local_stack.ps1` or the Makefile aliases for normal local work:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local_stack.ps1 -Command local-env-check
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local_stack.ps1 -Command local-up
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local_stack.ps1 -Command local-status
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local_stack.ps1 -Command local-smoke-test
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local_stack.ps1 -Command local-install-autostart
+```
+
+Cloud AWS deployment is deprecated for now. Keep CloudFormation/Lambda/API Gateway/DynamoDB/SQS files for history and retirement inventory, but do not use them as the primary runtime path.
+
+Use Floci for local AWS emulation at `http://localhost:4566`.
+
+Required fake local credentials for all local AWS work:
+- `AWS_ACCESS_KEY_ID=test`
+- `AWS_SECRET_ACCESS_KEY=test`
+- `AWS_DEFAULT_REGION=ap-south-1`
+- `AWS_REGION=ap-south-1`
+- `AWS_ENDPOINT_URL=http://localhost:4566`
+
+Do not use the user's default AWS profile for local work. Do not run local commands if `AWS_PROFILE` looks like a real cloud profile. Do not run `terraform apply`, `sam deploy`, or CloudFormation deploy against real AWS for local verification.
+
+Use the repo-local command wrapper:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local_floci.ps1 -Command env-check
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local_floci.ps1 -Command up
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local_floci.ps1 -Command infra-apply
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local_floci.ps1 -Command lambda-deploy
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local_floci.ps1 -Command smoke-test
+```
+
+Do not add `AUTH_DISABLED`, `SKIP_AUTH`, or auth bypasses for local emulator work. This repo currently has custom worker-token auth but no implemented Cognito resource stack; document that limitation instead of weakening auth.
+
 ## OpenCode cost-aware model routing
 
 Two providers serve this project:

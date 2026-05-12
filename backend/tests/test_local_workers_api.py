@@ -24,8 +24,19 @@ async def _approved_worker(test_client: AsyncClient):
     )
     request_id = registered.json()["request"]["id"]
     pairing_token = registered.json()["pairing_token"]
-    approved = await test_client.post(f"/api/local-workers/requests/{request_id}/approve")
+    approved = await test_client.post(
+        f"/api/local-workers/requests/{request_id}/approve",
+        headers=_admin_headers(),
+    )
     return request_id, pairing_token, approved.json()["worker"], approved.json()["credentials"]
+
+
+def _admin_headers() -> dict[str, str]:
+    from backend.app.config import settings
+
+    if settings.worker_auth_token:
+        return {"Authorization": f"Bearer {settings.worker_auth_token}"}
+    return {}
 
 
 @pytest.mark.asyncio
@@ -37,6 +48,7 @@ async def test_register_approve_deny_revoke_and_rotate_worker(test_client: Async
     deny_response = await test_client.post(
         f"/api/local-workers/requests/{denied.json()['request']['id']}/deny",
         json={"reason": "not this machine"},
+        headers=_admin_headers(),
     )
     assert deny_response.status_code == 200
     assert deny_response.json()["request"]["status"] == "denied"
@@ -52,11 +64,11 @@ async def test_register_approve_deny_revoke_and_rotate_worker(test_client: Async
     installer_registration = await test_client.get(f"/api/local-workers/registrations/{request_id}?pairing_token={pairing_token}")
     assert installer_registration.json()["credentials"]["api_token"]
 
-    rotated = await test_client.post(f"/api/local-workers/{worker['id']}/rotate-credentials")
+    rotated = await test_client.post(f"/api/local-workers/{worker['id']}/rotate-credentials", headers=_admin_headers())
     assert rotated.status_code == 200
     assert rotated.json()["credentials"]["api_token"]
 
-    revoked = await test_client.post(f"/api/local-workers/{worker['id']}/revoke")
+    revoked = await test_client.post(f"/api/local-workers/{worker['id']}/revoke", headers=_admin_headers())
     assert revoked.status_code == 200
     assert revoked.json()["worker"]["status"] == "revoked"
 
@@ -115,7 +127,7 @@ async def test_worker_event_completes_existing_work_item(test_client: AsyncClien
 async def test_revoked_and_expired_workers_cannot_submit_events(test_client: AsyncClient):
     _, _, worker, credentials = await _approved_worker(test_client)
 
-    await test_client.post(f"/api/local-workers/{worker['id']}/revoke")
+    await test_client.post(f"/api/local-workers/{worker['id']}/revoke", headers=_admin_headers())
     revoked_event = await test_client.post(
         f"/api/local-workers/{worker['id']}/events",
         headers={"Authorization": f"Bearer {credentials['api_token']}"},
@@ -191,7 +203,7 @@ async def test_sqs_events_from_revoked_worker_are_rejected(test_client: AsyncCli
         )
     ).json()["claim"]
 
-    await test_client.post(f"/api/local-workers/{worker['id']}/revoke")
+    await test_client.post(f"/api/local-workers/{worker['id']}/revoke", headers=_admin_headers())
 
     from backend.app.services.local_workers import LocalWorkerService
 
@@ -233,7 +245,7 @@ async def test_local_worker_dashboard_redacts_claim_tokens(test_client: AsyncCli
         headers={"Authorization": f"Bearer {credentials['api_token']}"},
     )
 
-    dashboard = await test_client.get("/api/local-workers")
+    dashboard = await test_client.get("/api/local-workers", headers=_admin_headers())
     assert dashboard.status_code == 200
     assert dashboard.json()["jobs"]
     assert all("claim_token" not in job for job in dashboard.json()["jobs"])
@@ -258,7 +270,7 @@ async def test_revoked_worker_cannot_update_claimed_job_with_shared_token(test_c
             )
         ).json()["claim"]
 
-        await test_client.post(f"/api/local-workers/{worker['id']}/revoke")
+        await test_client.post(f"/api/local-workers/{worker['id']}/revoke", headers=_admin_headers())
         response = await test_client.post(
             f"/api/worker/jobs/{claim['job']['id']}/heartbeat",
             headers={"x-idearefinery-worker-token": "shared-test-token"},
@@ -292,13 +304,13 @@ async def test_purge_revoked_workers_deletes_worker_data(test_client: AsyncClien
         )
     ).json()["claim"]
 
-    await test_client.post(f"/api/local-workers/{worker['id']}/revoke")
+    await test_client.post(f"/api/local-workers/{worker['id']}/revoke", headers=_admin_headers())
     worker_record = await get_repository().get_local_worker(worker["id"])
     assert worker_record is not None
     worker_record.updated_at = utcnow() - timedelta(days=31)
     get_repository().local_workers[worker_record.id] = worker_record
 
-    purged = await test_client.post("/api/local-workers/purge-revoked")
+    purged = await test_client.post("/api/local-workers/purge-revoked", headers=_admin_headers())
     assert purged.status_code == 200
     assert purged.json()["purged"] >= 1
     assert await get_repository().get_local_worker(worker["id"]) is None

@@ -41,4 +41,6 @@ class WorkerSqsPublisher:
     def _client(self):
         import boto3
 
-        return boto3.client("sqs", region_name=self.region)
+        from backend.app.aws_endpoints import endpoint_url
+
+        return boto3.client("sqs", region_name=self.region, endpoint_url=endpoint_url("sqs"))

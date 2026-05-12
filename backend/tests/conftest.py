@@ -9,6 +9,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from backend.app.config import settings
 from backend.app.main import app
 from backend.app.repository import (
     Idea,
@@ -84,6 +85,14 @@ class FakeSession:
 
     async def refresh(self, item: object) -> None:
         return None
+
+
+@pytest.fixture(autouse=True)
+def test_worker_auth_token():
+    original_token = settings.worker_auth_token
+    settings.worker_auth_token = "test-token"
+    yield
+    settings.worker_auth_token = original_token
 
 
 @pytest_asyncio.fixture

@@ -5,6 +5,10 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .backend_client import BackendClient
 
 from .artifacts import normalize_output_dir, write_json_artifact, write_text_artifact
 from .commands import SafeCommandPolicy
@@ -194,8 +198,60 @@ class KarigarRunner:
 
             consecutive_errors = 0
 
+            # ── Emit job:started event ─────────────────────────────────
+            if factory_run_id:
+                self._emit_event_safe(
+                    client,
+                    factory_run_id,
+                    "job:started",
+                    {
+                        "job_id": job_id,
+                        "task_title": claim.get("task_title", ""),
+                        "engine_name": claim.get("engine_name", "mock"),
+                        "repository_path": claim.get("repository_path", ""),
+                    },
+                )
+
+            result_dict: dict[str, object] = {}
             try:
                 result = self.run_job(claim)
+
+                # ── Emit job:checkpoint after verifications ────────────
+                if factory_run_id:
+                    self._emit_event_safe(
+                        client,
+                        factory_run_id,
+                        "job:checkpoint",
+                        {
+                            "job_id": job_id,
+                            "status": result.status.value,
+                            "verification_count": len(result.verification_results),
+                            "changed_files": result.changed_files,
+                            "summary": result.summary,
+                        },
+                    )
+
+                # ── Auto-Repair: retry on verification failure ─────
+                auto_repair_enabled = (
+                    claim.get("engine_config", {}).get("auto_repair", False)
+                    or claim.get("metadata", {}).get("auto_repair", False)
+                )
+                if (
+                    auto_repair_enabled
+                    and result.status
+                    not in (JobStatus.SUCCESS, JobStatus.BLOCKED, JobStatus.CANCELLED)
+                ):
+                    from .auto_repair import AutoRepairEngine
+
+                    repair_engine = AutoRepairEngine(
+                        max_retries=3,
+                        backend_client=client if factory_run_id else None,
+                        factory_run_id=factory_run_id,
+                    )
+                    result, _repair_history = repair_engine.execute_with_repair(
+                        claim, self.run_job
+                    )
+
                 result_dict = result.to_dict()
 
                 if result.status == JobStatus.SUCCESS:
@@ -207,6 +263,20 @@ class KarigarRunner:
                         engine=result.engine_used,
                         branch_name=result.branch_name or "",
                     )
+                    # ── Emit job:completed event ──────────────────────
+                    if factory_run_id:
+                        self._emit_event_safe(
+                            client,
+                            factory_run_id,
+                            "job:completed",
+                            {
+                                "job_id": job_id,
+                                "status": "success",
+                                "engine_used": result.engine_used,
+                                "summary": result.summary,
+                                "branch_name": result.branch_name or "",
+                            },
+                        )
                 elif result.status in (JobStatus.FAILED, JobStatus.TIMED_OUT):
                     client.fail_job(
                         job_id=job_id,
@@ -215,6 +285,19 @@ class KarigarRunner:
                         retryable=result.status == JobStatus.TIMED_OUT,
                         logs=json.dumps(result_dict),
                     )
+                    # ── Emit job:failed event ─────────────────────────
+                    if factory_run_id:
+                        self._emit_event_safe(
+                            client,
+                            factory_run_id,
+                            "job:failed",
+                            {
+                                "job_id": job_id,
+                                "status": result.status.value,
+                                "error": result.failure_reason or result.summary,
+                                "retryable": result.status == JobStatus.TIMED_OUT,
+                            },
+                        )
                 else:
                     # BLOCKED, CANCELLED — report as failure, not retryable
                     client.fail_job(
@@ -224,6 +307,19 @@ class KarigarRunner:
                         retryable=False,
                         logs=json.dumps(result_dict),
                     )
+                    # ── Emit job:failed event (blocked/cancelled) ─────
+                    if factory_run_id:
+                        self._emit_event_safe(
+                            client,
+                            factory_run_id,
+                            "job:failed",
+                            {
+                                "job_id": job_id,
+                                "status": result.status.value,
+                                "error": result.failure_reason or result.summary,
+                                "retryable": False,
+                            },
+                        )
             except Exception:
                 # Best-effort failure report
                 try:
@@ -233,6 +329,19 @@ class KarigarRunner:
                         error="Karigar execution exception",
                         retryable=True,
                     )
+                    # ── Emit job:failed event (execution exception) ────
+                    if factory_run_id:
+                        self._emit_event_safe(
+                            client,
+                            factory_run_id,
+                            "job:failed",
+                            {
+                                "job_id": job_id,
+                                "status": "exception",
+                                "error": "Karigar execution exception",
+                                "retryable": True,
+                            },
+                        )
                 except Exception:
                     pass
 
@@ -252,6 +361,20 @@ class KarigarRunner:
                 except Exception:
                     # Ledger is best-effort — don't block job processing
                     pass
+
+    @staticmethod
+    def _emit_event_safe(
+        client: "BackendClient",
+        run_id: str,
+        event_type: str,
+        payload: dict[str, object],
+    ) -> None:
+        """Best-effort emit a run-scoped event to the backend WebSocket channel."""
+        try:
+            client.emit_event(run_id=run_id, event_type=event_type, payload=payload)  # type: ignore[union-attr]
+        except Exception:
+            # Emit failures must never block job processing
+            pass
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()

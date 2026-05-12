@@ -175,6 +175,35 @@ class BackendClient:
         response.raise_for_status()
         return response.json()
 
+    # ── Emit run-scoped event (WebSocket broadcast) ──────────
+
+    def emit_event(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Emit a run-scoped event to be broadcast to WebSocket subscribers.
+
+        Posts to POST /api/ws/emit with run_id, event_type, and optional payload.
+        Uses worker token (Authorization header) and X-Worker-ID header for auth.
+        """
+        headers = self._headers()
+        headers["X-Worker-ID"] = self.worker_id
+        body = {
+            "run_id": run_id,
+            "event_type": event_type,
+            "payload": payload or {},
+        }
+        response = httpx.post(
+            f"{self.api_base_url}/api/ws/emit",
+            json=body,
+            headers=headers,
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+
 
     # ── Report result (alias for complete_job) ───────────────
 

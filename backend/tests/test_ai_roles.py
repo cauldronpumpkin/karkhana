@@ -40,6 +40,15 @@ def _worker_context() -> dict:
             "ledger_path": "karkhana-runs/run_123.md",
             "sections": {"Current goal": "Implement the backend phase"},
         },
+        "spec_kit_contract": {
+            "enabled": True,
+            "source": "https://github.com/github/spec-kit",
+            "lifecycle": [
+                {"phase": "specify", "command": "/speckit.specify"},
+                {"phase": "plan", "command": "/speckit.plan"},
+                {"phase": "implement", "command": "/speckit.implement"},
+            ],
+        },
         "goal": "Implement the backend phase",
     }
 

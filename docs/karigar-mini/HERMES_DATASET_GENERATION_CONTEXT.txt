@@ -1,0 +1,104 @@
+Karigar-Mini dataset generation context for Hermes
+=================================================
+
+Purpose
+-------
+Generate high-quality candidate dataset episodes for Karigar-Mini, a future local coding-worker model for the Karkhana / Idea Refinery project.
+
+This is dataset generation only. Do not modify application runtime behavior. Do not build training code. Do not fine-tune a model. Do not add dependencies.
+
+Repo and architecture context
+-----------------------------
+Project: Idea Refinery / Karkhana.
+
+The backend/web app is the control plane. Local workers are the execution plane. Generated code changes should happen on feature branches. Workers should inspect repo context, make narrow changes, run tests, report honestly, and escalate when needed.
+
+Use these concepts in generated examples:
+- Project twins
+- Local workers
+- Work items
+- Agent runs
+- Commits
+- Memory
+- Build handoff
+- Graphify navigation
+- FastAPI backend
+- Svelte frontend
+- Tauri worker app
+- Local-first Floci runtime
+- Worker job claim, execution, verification, and report lifecycle
+
+Safety rules
+------------
+- Do not include secrets, tokens, credentials, raw environment variables, private account data, or private external identifiers.
+- Do not invent exact current test results.
+- Do not include large code blocks or raw logs.
+- Do not teach auth bypasses such as AUTH_DISABLED or SKIP_AUTH.
+- Do not teach real AWS deployment as local verification.
+- Do not teach backend/control-plane code to execute heavy worker jobs.
+- Do not normalize unrelated edits or hidden failures.
+
+Output locations
+----------------
+Write generated candidate batches to ignored local-only paths such as:
+- docs/karigar-mini/candidates/
+- docs/karigar-mini/accepted/
+- docs/karigar-mini/rejected/
+- docs/karigar-mini/generated/
+
+Do not assume JSONL files are intended for git. Dataset artifacts are local-only unless a human explicitly promotes a small sanitized artifact.
+
+Episode schema
+--------------
+Use docs/karigar-mini/KARIGAR_WORKER_EPISODE_SCHEMA.json as the source schema.
+
+Allowed episode types:
+- worker_execution_success
+- worker_execution_failure
+- cloud_rescue
+- repo_inspection_plan
+- test_failure_triage
+- architecture_guardrail_review
+- final_worker_report
+- escalation_decision
+
+Required top-level fields:
+- episode_id
+- episode_type
+- source
+- task_title
+- user_request
+- project_context
+- repo_context
+- constraints
+- available_tools
+- expected_behavior
+- actions
+- patches_or_change_summary
+- verification
+- final_response
+- quality_label
+- rejection_reasons
+- escalation_reason
+- privacy_notes
+- metadata
+
+Recommended recurring job
+-------------------------
+On each run:
+1. Generate a small batch of 10 to 25 candidate JSONL episodes.
+2. Keep a balanced mix across episode types.
+3. Run privacy scrubbing.
+4. Run deduplication against recent candidate and accepted batches.
+5. Run critic labeling.
+6. Place accepted-looking examples in candidates first, not directly in accepted.
+7. Produce a short batch report with counts, rejected reasons, and review notes.
+
+Quality target
+--------------
+Prefer fewer excellent examples over many vague examples. A good episode teaches inspect -> plan -> edit narrowly -> verify -> summarize -> escalate if needed.
+
+Bad examples should be rejected if they are generic, hallucinated, unsafe, unverifiable, too large, or not specific to Karkhana.
+
+Use DATASET_GENERATION_PROMPTS.md for reusable prompt templates.
+

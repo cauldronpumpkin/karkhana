@@ -23,6 +23,7 @@ class BackendClient:
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if self.worker_token:
             headers["Authorization"] = f"Bearer {self.worker_token}"
+            headers["X-IdeaRefinery-Worker-Token"] = self.worker_token
         return headers
 
     # ── Claim a job ─────────────────────────────────────────
@@ -41,8 +42,24 @@ class BackendClient:
         response.raise_for_status()
         data = response.json()
         claim = data.get("claim", {})
-        if not claim or not claim.get("job_id"):
+        if not claim:
             raise ValueError(f"No claim returned from backend: {data}")
+        # Normalize: the backend nests job fields under claim.job.{id,claim_token,...}
+        job = claim.get("job") or {}
+        if job.get("id"):
+            claim["job_id"] = job["id"]
+        if job.get("claim_token"):
+            claim["claim_token"] = job["claim_token"]
+        if job.get("branch_name"):
+            claim["branch_name"] = job["branch_name"]
+        if job.get("payload"):
+            claim["payload"] = job["payload"]
+        if job.get("job_type"):
+            claim["job_type"] = job["job_type"]
+        if job.get("verification_commands"):
+            claim["verification_commands"] = job["verification_commands"]
+        if not claim.get("job_id"):
+            raise ValueError(f"Claim has no job_id: {data}")
         return claim
 
     # ── Report job completion ───────────────────────────────

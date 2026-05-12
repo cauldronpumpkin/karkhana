@@ -2246,7 +2246,30 @@ class DynamoDBRepository(Repository):
         return GitHubInstallation(id=item["id"], installation_id=str(item["installation_id"]), account_login=item["account_login"], account_type=item.get("account_type", "User"), status=item.get("status", "active"), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
 
     def _project_twin(self, item: dict[str, Any]) -> ProjectTwin:
-        return ProjectTwin(id=item["id"], idea_id=item["idea_id"], provider=item.get("provider", "github"), installation_id=str(item["installation_id"]), owner=item["owner"], repo=item["repo"], repo_full_name=item["repo_full_name"], repo_url=item["repo_url"], clone_url=item["clone_url"], default_branch=item["default_branch"], active_branch=item.get("active_branch"), deploy_url=item.get("deploy_url"), desired_outcome=item.get("desired_outcome"), current_status=item.get("current_status"), detected_stack=item.get("detected_stack") or [], test_commands=item.get("test_commands") or [], last_indexed_commit=item.get("last_indexed_commit"), index_status=item.get("index_status", "not_indexed"), health_status=item.get("health_status", "unknown"), open_queue_count=int(item.get("open_queue_count", 0)), created_at=_dt(item.get("created_at")) or utcnow(), updated_at=_dt(item.get("updated_at")) or utcnow())
+        return ProjectTwin(
+            id=item.get("id", ""),
+            idea_id=item.get("idea_id", item.get("PK", "").replace("IDEA#", "")),
+            provider=item.get("provider", "github"),
+            installation_id=str(item.get("installation_id", "")),
+            owner=item.get("owner", ""),
+            repo=item.get("repo", ""),
+            repo_full_name=item.get("repo_full_name", ""),
+            repo_url=item.get("repo_url", ""),
+            clone_url=item.get("clone_url", ""),
+            default_branch=item.get("default_branch", "main"),
+            active_branch=item.get("active_branch"),
+            deploy_url=item.get("deploy_url"),
+            desired_outcome=item.get("desired_outcome"),
+            current_status=item.get("current_status"),
+            detected_stack=item.get("detected_stack") or [],
+            test_commands=item.get("test_commands") or [],
+            last_indexed_commit=item.get("last_indexed_commit"),
+            index_status=item.get("index_status", "not_indexed"),
+            health_status=item.get("health_status", "unknown"),
+            open_queue_count=int(item.get("open_queue_count", 0)),
+            created_at=_dt(item.get("created_at")) or utcnow(),
+            updated_at=_dt(item.get("updated_at")) or utcnow(),
+        )
 
     def _code_index(self, item: dict[str, Any]) -> CodeIndexArtifact:
         return CodeIndexArtifact(id=item["id"], project_id=item["project_id"], idea_id=item["idea_id"], commit_sha=item["commit_sha"], file_inventory=item.get("file_inventory") or [], manifests=item.get("manifests") or [], dependency_graph=item.get("dependency_graph") or {}, route_map=item.get("route_map") or [], test_commands=item.get("test_commands") or [], architecture_summary=item.get("architecture_summary", ""), risks=item.get("risks") or [], todos=item.get("todos") or [], searchable_chunks=item.get("searchable_chunks") or [], created_at=_dt(item.get("created_at")) or utcnow())
